@@ -103,7 +103,7 @@ go vet ./...
 
 > **打包不会升级版本号。** `package-shortcuts.ps1` 只按 `shortcuts/manifest` 里现有的 `version=` 出包；`bump-version.ps1` 才递增并同步 UI/README，先 bump 再打包，否则会重复产出同一个旧版本。
 
-当前测试包版本：`1.0.282`。
+当前测试包版本：`1.0.287`。
 
 ### 发布
 

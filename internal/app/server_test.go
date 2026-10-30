@@ -1,12 +1,14 @@
 package app
 
 import (
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	"github.com/chens-hi/shortcuts/internal/deployer"
 	"github.com/chens-hi/shortcuts/internal/icons"
 	"github.com/chens-hi/shortcuts/internal/logger"
+	"github.com/chens-hi/shortcuts/internal/model"
 	"github.com/chens-hi/shortcuts/internal/provider"
 	"github.com/chens-hi/shortcuts/internal/repository"
 	"github.com/chens-hi/shortcuts/internal/service"
@@ -343,5 +346,138 @@ func TestListenTCPReportsOccupiedPort(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatalf("端口已被占用时应返回错误，addr=%q", addr)
+	}
+}
+
+func decodeEntryNames(t *testing.T, body []byte) []string {
+	t.Helper()
+	var response struct {
+		Entries []model.Entry `json:"entries"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		t.Fatalf("decode entries: %v body=%s", err, body)
+	}
+	names := make([]string, 0, len(response.Entries))
+	for _, entry := range response.Entries {
+		names = append(names, entry.AppName)
+	}
+	return names
+}
+
+func TestHandleEntriesReorder(t *testing.T) {
+	app := newStubAppCenter()
+	server := handlerForServerTest(t, app)
+	serve := func(req *http.Request) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, req)
+		return rr
+	}
+	for _, name := range []string{"alpha", "bravo", "charlie"} {
+		query := entryCreateQuery()
+		query.Set("appname", name)
+		query.Set("displayName", name)
+		rr := serve(httptest.NewRequest(http.MethodPost, "/app/shortcuts/api/entries?"+query.Encode(), nil))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", name, rr.Code, rr.Body.String())
+		}
+	}
+
+	want := []string{"charlie", "alpha", "bravo"}
+	payload, err := json.Marshal(map[string]any{"order": want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := serve(httptest.NewRequest(http.MethodPut, "/app/shortcuts/api/entries", strings.NewReader(string(payload))))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("reorder: %d %s", rr.Code, rr.Body.String())
+	}
+	if got := decodeEntryNames(t, rr.Body.Bytes()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("reorder response order = %v, want %v", got, want)
+	}
+
+	rr = serve(httptest.NewRequest(http.MethodGet, "/app/shortcuts/api/entries", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list after reorder: %d %s", rr.Code, rr.Body.String())
+	}
+	if got := decodeEntryNames(t, rr.Body.Bytes()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("persisted order = %v, want %v", got, want)
+	}
+}
+
+func TestHandleEntriesReorderRejectsInvalidRequests(t *testing.T) {
+	server := handlerForServerTest(t)
+	serve := func(body string) (int, string) {
+		req := httptest.NewRequest(http.MethodPut, "/app/shortcuts/api/entries", strings.NewReader(body))
+		rr := httptest.NewRecorder()
+		stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, req)
+		return rr.Code, rr.Body.String()
+	}
+	for _, name := range []string{"alpha", "bravo"} {
+		query := entryCreateQuery()
+		query.Set("appname", name)
+		query.Set("displayName", name)
+		req := httptest.NewRequest(http.MethodPost, "/app/shortcuts/api/entries?"+query.Encode(), nil)
+		rr := httptest.NewRecorder()
+		stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("create %s: %d %s", name, rr.Code, rr.Body.String())
+		}
+	}
+
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"malformed", `{`},
+		{"missing", `{}`},
+		{"null", `{"order":null}`},
+		{"short", `{"order":["alpha"]}`},
+		{"duplicate", `{"order":["alpha","alpha"]}`},
+		{"unknown", `{"order":["alpha","zulu"]}`},
+		{"too-large", `{"order":["` + strings.Repeat("a", maxReorderBody) + `"]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := serve(tc.body)
+			if code != http.StatusBadRequest {
+				t.Fatalf("%s: code = %d body=%s, want 400", tc.name, code, body)
+			}
+		})
+	}
+
+	// 被拒绝的请求不能动到已存顺序。
+	rr := httptest.NewRecorder()
+	stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/app/shortcuts/api/entries", nil))
+	if got := decodeEntryNames(t, rr.Body.Bytes()); !reflect.DeepEqual(got, []string{"alpha", "bravo"}) {
+		t.Fatalf("rejected requests changed order: %v", got)
+	}
+}
+
+func TestHandleEntriesCollectionMethods(t *testing.T) {
+	server := handlerForServerTest(t)
+	serve := func(req *http.Request) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, req)
+		return rr
+	}
+
+	// PATCH 集合仍然不支持。
+	if rr := serve(httptest.NewRequest(http.MethodPatch, "/app/shortcuts/api/entries", nil)); rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("PATCH /api/entries = %d, want 405", rr.Code)
+	}
+
+	// 新增排序接口不能截走单条目的 PUT。
+	query := entryCreateQuery()
+	if rr := serve(httptest.NewRequest(http.MethodPost, "/app/shortcuts/api/entries?"+query.Encode(), nil)); rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body.String())
+	}
+	update := url.Values{}
+	update.Set("displayName", "Alpha2")
+	rr := serve(httptest.NewRequest(http.MethodPut, "/app/shortcuts/api/entries/moviepilot?"+update.Encode(), nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("PUT /api/entries/<name> = %d %s, want 200", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"displayName": "Alpha2"`) {
+		t.Fatalf("single entry update did not save: %s", rr.Body.String())
 	}
 }

@@ -207,9 +207,49 @@ func (s *Server) handleEntries(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "mainAppname": s.Config.MainAppname})
 	case http.MethodPost:
 		s.handleSave(w, r, "")
+	case http.MethodPut:
+		s.handleReorder(w, r)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, model.ErrMethod)
 	}
+}
+
+// maxReorderBody 只需要容纳 appname 数组，给到 64KB 已经远超实际条目量。
+const maxReorderBody = 64 << 10
+
+// handleReorder 处理集合级 PUT：请求体 {"order": ["appname", ...]} 表示把
+// 配置列表整体重排为该顺序。用 PUT 而不是 PATCH，是因为网关与桌面宿主对
+// PATCH 从未验证过，而集合上的 PUT 与单条目的 PUT 不冲突（后者在
+// /api/entries/<name> 上仍走 handleSave）。
+func (s *Server) handleReorder(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxReorderBody+1))
+	if err != nil {
+		writeValidationDetail(w, "读取排序请求体失败: "+err.Error())
+		return
+	}
+	if len(body) > maxReorderBody {
+		writeValidationDetail(w, "排序请求体超过 64KB 上限")
+		return
+	}
+	// Order 用指针：字段缺失与显式 null 都是「没给出完整顺序」，必须报错。
+	// 解成空切片再继续，会把一次误请求变成「清空整份配置」。
+	var payload struct {
+		Order *[]string `json:"order"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeValidationDetail(w, "请求体不是 JSON 对象: "+err.Error())
+		return
+	}
+	if payload.Order == nil {
+		writeValidationDetail(w, "order is required")
+		return
+	}
+	entries, err := s.Svc.ReorderEntries(*payload.Order)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "mainAppname": s.Config.MainAppname})
 }
 
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, appName string) {

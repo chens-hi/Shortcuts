@@ -162,6 +162,52 @@ func (s *Service) ListEntries() ([]model.Entry, error) {
 	return entries, nil
 }
 
+// ReorderEntries 按 appnames 重排配置列表并落盘。只动顺序：条目的版本、
+// 配置、启停状态和桌面项标识都不变，也不触发部署或卸载。appnames 必须与
+// 文件里的条目一一对应——缺项、重复、未知名字都说明调用方拿的是过期快照，
+// 宁可报错让界面刷新，也不能按错误的集合整份覆盖。
+//
+// decorate 必须在 Save 之后做：Status/Runtime 这些字段是查询时的瞬时状态，
+// 混进落盘数据会被当成配置持久化下来。
+func (s *Service) ReorderEntries(appnames []string) ([]model.Entry, error) {
+	var ordered []model.Entry
+	if _, err := s.withRepoWrite(func(entries []model.Entry) ([]model.Entry, error) {
+		if len(appnames) != len(entries) {
+			return nil, model.Errorf(model.ErrValidation,
+				"order must contain every entry exactly once: order=%d entries=%d", len(appnames), len(entries))
+		}
+		byName := make(map[string]model.Entry, len(entries))
+		for _, entry := range entries {
+			byName[entry.AppName] = entry
+		}
+		// 新建切片而不是原地整理：repo 的 entries 可能与调用方共享底层数组。
+		next := make([]model.Entry, 0, len(appnames))
+		seen := make(map[string]bool, len(appnames))
+		for _, appName := range appnames {
+			if seen[appName] {
+				return nil, model.Errorf(model.ErrValidation, "duplicate appname in order: %s", appName)
+			}
+			entry, ok := byName[appName]
+			if !ok {
+				return nil, model.Errorf(model.ErrValidation, "unknown appname in order: %s", appName)
+			}
+			seen[appName] = true
+			next = append(next, entry)
+		}
+		ordered = next
+		return next, nil
+	}); err != nil {
+		return nil, err
+	}
+	// 列表查询失败不应把一次成功的写入报成失败：磁盘已经改好了，
+	// 返回 500 只会让前端回滚到一个已经不存在的旧顺序。
+	apps, _ := s.installedApps()
+	for i := range ordered {
+		ordered[i] = decorate(ordered[i], apps, s.Config.MainAppname)
+	}
+	return ordered, nil
+}
+
 func (s *Service) CreateEntry(input EntryInput) (SaveResult, error) {
 	entry, err := s.normalizeInput(input, nil)
 	if err != nil {

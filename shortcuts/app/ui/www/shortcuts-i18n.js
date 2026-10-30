@@ -1,4 +1,4 @@
-const SHORTCUTS_VERSION = "1.0.282";
+const SHORTCUTS_VERSION = "1.0.287";
 
 
 
@@ -132,6 +132,10 @@ const T = {
 
     iconPreviewAlt: "图标预览",
 
+    reorderHandle: "拖拽排序",
+
+    reorderAnnounce: "已移动到第 {position} 项",
+
     theme: {
 
       toDark: "切换到暗色主题",
@@ -241,6 +245,8 @@ const T = {
       iconFailed: "图标处理失败，请稍后重试",
 
       saveFailed: "保存配置失败，请稍后重试",
+
+      reorderFailed: "保存顺序失败，已刷新列表",
 
       deployFailed: "{action}失败，请稍后重试",
 
@@ -520,16 +526,18 @@ function initLocalizedHtml() {
 
   const columns = document.querySelectorAll(".entry-table th");
 
-  if (columns.length >= 4) {
+  if (columns.length >= 5) {
 
-    // 第一列是状态圆点，窄列放不下文字，只给读屏用的列名。
-    columns[0].setAttribute("aria-label", T.html.columnStatus);
+    // 前两列是拖拽手柄和状态圆点，窄列放不下文字，只给读屏用的列名。
+    columns[0].setAttribute("aria-label", T.dynamic.reorderHandle);
 
-    columns[1].textContent = T.html.columnDisplayName;
+    columns[1].setAttribute("aria-label", T.html.columnStatus);
 
-    columns[2].textContent = T.html.columnTarget;
+    columns[2].textContent = T.html.columnDisplayName;
 
-    columns[3].textContent = T.html.columnAction;
+    columns[3].textContent = T.html.columnTarget;
+
+    columns[4].textContent = T.html.columnAction;
 
   }
 

@@ -1,5 +1,5 @@
 appname=shortcuts
-version=1.0.282
+version=1.0.287
 display_name=快捷图标
 desc=快捷图标 是飞牛 fnOS 原生应用，把局域网服务的端口与路径生成为独立的桌面快捷入口。
 source=thirdparty
@@ -15,4 +15,4 @@ ctl_stop=true
 checkport=false
 disable_authorization_path=true
 micro_app=true
-changelog=版本 1.0.282：优化执行效率，修复部分问题。
+changelog=版本 1.0.287：配置列表名称表头改为左对齐，与下方名称内容对齐。

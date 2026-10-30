@@ -92,6 +92,8 @@
 
     const toast = document.querySelector("#toast");
 
+    const orderAnnounce = document.querySelector("#orderAnnounce");
+
     const cropOverlay = document.querySelector("#cropOverlay");
 
     const cropCanvas = document.querySelector("#cropCanvas");
@@ -131,6 +133,21 @@
     let refreshTimer = null;
 
     let currentEntries = [];
+
+    // 行拖拽状态。不要复用 dragStart：那是图标裁剪的指针起点。
+    // isReordering 覆盖整个拖拽过程，isSavingOrder 覆盖整个保存链，
+    // 两者都会挡住 10s 定时刷新和在途请求的重绘。
+    let rowDragState = null;
+
+    let isReordering = false;
+
+    let isSavingOrder = false;
+
+    let orderSaveTimer = null;
+
+    let orderSaveChain = Promise.resolve();
+
+    let orderSavePending = 0;
 
     let currentEditAppname = null;
 
@@ -1817,6 +1834,9 @@
 
 
 
+    // 六点手柄：单纯的点阵比「≡」更像可拖拽的抓手，也不会被误认成菜单按钮。
+    const DRAG_HANDLE_ICON = '<svg viewBox="0 0 12 18" aria-hidden="true" draggable="false"><circle cx="4" cy="4" r="1.4"></circle><circle cx="8" cy="4" r="1.4"></circle><circle cx="4" cy="9" r="1.4"></circle><circle cx="8" cy="9" r="1.4"></circle><circle cx="4" cy="14" r="1.4"></circle><circle cx="8" cy="14" r="1.4"></circle></svg>';
+
     // 类型图标：与「新增配置」类型选择弹窗里的一致，列表里放在目标值前面，
     // 让端口号 / 链接 / 路径 一眼能分清类型，不必回去看名字猜。
     const TYPE_ICONS = {
@@ -1971,11 +1991,13 @@
 
         .map((entry) => {
 
-          return `<tr>
+          return `<tr data-appname="${escapeHtml(entry.appname)}">
+
+            <td class="drag-handle-cell"><span class="drag-handle" role="button" tabindex="0" draggable="false" aria-label="${escapeHtml(T.dynamic.reorderHandle)}" title="${escapeHtml(T.dynamic.reorderHandle)}">${DRAG_HANDLE_ICON}</span></td>
 
             <td class="status-dot-cell">${renderStatusDot(entry)}</td>
 
-            <td class="entry-cell"><span class="entry-title">${escapeHtml(entry.displayName)}</span></td>
+            <td class="entry-cell entry-name-cell" title="${escapeHtml(entry.displayName)}"><span class="entry-title">${escapeHtml(entry.displayName)}</span></td>
 
             ${renderTargetCell(entry)}
 
@@ -1989,7 +2011,12 @@
 
     }
 
-    async function fetchEntries() {
+    async function fetchEntries(options = {}) {
+
+      // 拖拽或保存顺序期间不能重绘：整表 innerHTML 重绘会把正在拖的行
+      // 从 DOM 里摘掉，也会让用户刚排好的顺序跳回服务端旧值。
+      // 在途请求返回后要再判断一次：请求可能早于拖拽开始。
+      if (!options.force && (isReordering || isSavingOrder)) return currentEntries;
 
       if (currentEntries.length > 0) {
         // 已有数据时不显示"加载中..."，避免撑开空间导致表格抖动
@@ -2008,6 +2035,8 @@
 
       if (!response.ok) throw new Error(data.error || T.dynamic.errors.readFallback);
 
+      if (!options.force && (isReordering || isSavingOrder)) return currentEntries;
+
       currentEntries = (data.entries || []).map((entry) => normalizeEntry(entry));
 
       renderEntries(currentEntries);
@@ -2016,6 +2045,8 @@
 
         // 索引是异步的：先按服务端状态渲染，拿到桌面列表后再覆盖"丢失"状态。
         loadDesktopIndex().then(() => {
+
+          if (!options.force && (isReordering || isSavingOrder)) return;
 
           if (currentEntries.some((entry) => entry.type === "folder")) renderEntries(currentEntries);
 
@@ -2029,6 +2060,123 @@
 
 
 
+    // 配置列表排序。拖动过程中 DOM 顺序就是唯一事实来源，松手或按键结束
+    // 后才把顺序同步到 currentEntries 并发给服务端。
+
+    function currentOrderFromDom() {
+      return Array.from(entryRows.children).map((row) => row.getAttribute("data-appname") || "");
+    }
+
+    function rowFromEvent(event) {
+      const target = event.target instanceof Element ? event.target.closest("tr") : null;
+      return target && target.parentElement === entryRows ? target : null;
+    }
+
+    function hasOrderChanged(order) {
+      if (order.length !== currentEntries.length) return true;
+      return order.some((appname, index) => currentEntries[index].appname !== appname);
+    }
+
+    function applyOrderToCache(order) {
+      const byName = new Map(currentEntries.map((entry) => [entry.appname, entry]));
+      const next = order.map((appname) => byName.get(appname));
+      if (next.every(Boolean)) currentEntries = next;
+    }
+
+    function announceOrderPosition(row) {
+      if (!orderAnnounce) return;
+      const position = Array.prototype.indexOf.call(entryRows.children, row) + 1;
+      orderAnnounce.textContent = formatText(T.dynamic.reorderAnnounce, { position });
+    }
+
+    function resetRowDraggable() {
+      if (rowDragState && rowDragState.row) rowDragState.row.draggable = false;
+      rowDragState = null;
+    }
+
+    function finishRowDrag(event) {
+      const state = rowDragState;
+      if (!state) {
+        isReordering = false;
+        return;
+      }
+      const order = currentOrderFromDom();
+      const changed = Array.isArray(state.originalOrder) && order.join("\n") !== state.originalOrder.join("\n");
+      // 只有真正落在行上（drop 被拦截）才算提交；Esc、拖出表格松手都不会有 drop。
+      const cancelled = !state.dropped;
+      if (state.row) {
+        state.row.classList.remove("is-dragging");
+        state.row.draggable = false;
+      }
+      rowDragState = null;
+      isReordering = false;
+      if (!changed) return;
+      if (cancelled) {
+        // Esc 或拖到表格外：放回拖拽前的顺序，不写盘。
+        renderEntries(currentEntries);
+        return;
+      }
+      requestOrderSave();
+    }
+
+    function persistOrder() {
+      const order = currentOrderFromDom();
+      if (order.length !== currentEntries.length || !hasOrderChanged(order)) return Promise.resolve();
+      // 先乐观更新缓存；保存失败时下一次静默刷新会以服务端为准纠正。
+      applyOrderToCache(order);
+      return fetchJsonWithTimeout(`${API_BASE}/api/entries`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order }),
+        timeoutMs: 15000,
+      }).then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || data.error || T.dynamic.messages.reorderFailed);
+        if (!Array.isArray(data.entries) || isReordering) return;
+        // 保存期间顺序又变过：这次响应已经过期，别按旧顺序覆盖 DOM 和缓存，
+        // 交给排队中的下一次保存。
+        const domOrder = currentOrderFromDom();
+        if (domOrder.join("\n") !== order.join("\n")) return;
+        const nextEntries = data.entries.map((entry) => normalizeEntry(entry));
+        currentEntries = nextEntries;
+        // 顺序与 DOM 一致时不重绘：键盘排序后重绘会把焦点从手柄上抢走。
+        if (domOrder.join("\n") !== nextEntries.map((entry) => entry.appname).join("\n")) {
+          renderEntries(currentEntries);
+        }
+      }).catch((error) => {
+        showGeneralToast(userMessage(ERROR_CODES.SAVE, T.dynamic.messages.reorderFailed, errorDetail(error)));
+        // 服务端可能已经有别的改动，强制拉一次真实顺序；拖拽中先跳过，
+        // 松手后的静默刷新会纠正。
+        if (!isReordering) fetchEntries({ force: true }).catch(() => {});
+      });
+    }
+
+    function requestOrderSave() {
+      orderSavePending += 1;
+      isSavingOrder = true;
+      orderSaveChain = orderSaveChain.then(() => persistOrder()).catch(() => {}).finally(() => {
+        orderSavePending -= 1;
+        if (orderSavePending === 0) isSavingOrder = false;
+      });
+      return orderSaveChain;
+    }
+
+    function scheduleKeyboardOrderSave() {
+      isReordering = true;
+      if (orderSaveTimer) clearTimeout(orderSaveTimer);
+      orderSaveTimer = setTimeout(() => {
+        orderSaveTimer = null;
+        if (rowDragState && rowDragState.originalOrder) {
+          // 真正拖拽中：交给 dragend 保存，别把中途顺序写进去。
+          return;
+        }
+        // 只剩「按下手柄但没开始拖」的残留状态，顺手清掉。
+        resetRowDraggable();
+        isReordering = false;
+        requestOrderSave();
+      }, 250);
+    }
+
     // 列表刷新入口。分两层：
     //   refreshList      — 去重 + 仅在标签页可见且没有操作弹窗时刷新。
     //                      大多数触发场景（编辑点击、定时器、visibilitychange）用这个。
@@ -2038,6 +2186,7 @@
     // 大多数调用点保持静默；只有初始加载和操作后的刷新传 true，
     // 因为只有这两个时刻弹 toast 才真正有用。
     function shouldRefreshList() {
+      if (isReordering || isSavingOrder) return false;
       return document.visibilityState === "visible" && !operationOverlay.classList.contains("open");
     }
 
@@ -2055,7 +2204,7 @@
     }
 
     async function refreshList(showOnError = false) {
-      if (!shouldRefreshList()) return [];
+      if (!shouldRefreshList()) return currentEntries;
       if (refreshEntriesPromise) return refreshEntriesPromise;
       if (showOnError) {
         // 初始加载：列表读取失败是唯一一个用户看到空页面、
@@ -3001,6 +3150,79 @@
 
       formAppnameInput.value = formAppnameInput.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
 
+    });
+
+    entryRows.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      const handle = event.target instanceof Element ? event.target.closest(".drag-handle") : null;
+      if (!handle) return;
+      const row = handle.closest("tr");
+      if (!row || row.parentElement !== entryRows) return;
+      // HTML5 拖拽要求 dragstart 前元素已经是 draggable。只在手柄上按下时
+      // 临时打开，避免整行文字和操作按钮也能被拖走。
+      row.draggable = true;
+      rowDragState = { row, originalOrder: null };
+    });
+
+    document.addEventListener("mouseup", () => {
+      // 只按下没拖动时不会有 dragend，这里复位，别让整行保持可拖状态。
+      if (!rowDragState || isReordering) return;
+      resetRowDraggable();
+    });
+
+    entryRows.addEventListener("dragstart", (event) => {
+      const row = event.target instanceof Element ? event.target.closest("tr") : null;
+      if (!rowDragState || !row || rowDragState.row !== row) {
+        event.preventDefault();
+        return;
+      }
+      rowDragState.originalOrder = currentOrderFromDom();
+      rowDragState.dropped = false;
+      row.classList.add("is-dragging");
+      isReordering = true;
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        // 部分 Chromium 内嵌宿主只有在 setData 后才会真正开始拖拽。
+        event.dataTransfer.setData("text/plain", row.getAttribute("data-appname") || "");
+      }
+    });
+
+    entryRows.addEventListener("dragover", (event) => {
+      if (!rowDragState || !rowDragState.row) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+      const overRow = rowFromEvent(event);
+      const dragged = rowDragState.row;
+      if (!overRow || overRow === dragged) return;
+      // 越过目标行中线就换位，拖动过程中即时反馈，松手不需要再算一次。
+      const rect = overRow.getBoundingClientRect();
+      const insertAfter = event.clientY > rect.top + rect.height / 2;
+      entryRows.insertBefore(dragged, insertAfter ? overRow.nextSibling : overRow);
+    });
+
+    entryRows.addEventListener("drop", (event) => {
+      if (!rowDragState) return;
+      // 不拦截的话浏览器会按默认行为导航到拖拽数据。
+      event.preventDefault();
+      rowDragState.dropped = true;
+    });
+
+    document.addEventListener("dragend", finishRowDrag);
+
+    entryRows.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      const handle = event.target instanceof Element ? event.target.closest(".drag-handle") : null;
+      if (!handle) return;
+      const row = handle.closest("tr");
+      if (!row) return;
+      const sibling = event.key === "ArrowUp" ? row.previousElementSibling : row.nextElementSibling;
+      if (!sibling) return;
+      event.preventDefault();
+      if (event.key === "ArrowUp") entryRows.insertBefore(row, sibling);
+      else entryRows.insertBefore(sibling, row);
+      handle.focus();
+      announceOrderPosition(row);
+      scheduleKeyboardOrderSave();
     });
 
     entryRows.addEventListener("click", async (event) => {
