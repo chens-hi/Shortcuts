@@ -1,0 +1,17 @@
+appname               = {{.AppName}}
+version               = {{.Version}}
+display_name          = {{.DisplayName}}
+desc                  = {{.Desc}}
+platform              = all
+source                = thirdparty
+maintainer            = chens-hi
+maintainer_url        = https://github.com/chens-hi
+distributor           = shortcuts
+distributor_url       = https://github.com/chens-hi/shortcuts
+desktop_uidir         = ui
+os_min_version        = 1.2.0
+checkport             = false
+disable_authorization_path = true
+install_type           = root
+{{range $key, $value := .Extra}}{{$key}} = {{$value}}
+{{end}}

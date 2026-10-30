@@ -1,0 +1,197 @@
+#!/bin/bash
+set -u
+
+APP_NAME="${TRIM_APPNAME:-shortcuts}"
+PORT="${SERVICE_PORT:-${wizard_service_port:-23330}}"
+APP_DIR="${TRIM_APPDEST:-/var/apps/${APP_NAME}/target}"
+PID_FILE="/tmp/${APP_NAME}-server.pid"
+AGENT_PID_FILE="/tmp/${APP_NAME}-agent.pid"
+DATA_DIR="${TRIM_PKGVAR:-/usr/local/apps/@appdata/${APP_NAME}}"
+
+export PATH="/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+export PORT="$PORT"
+export SERVICE_PORT="$PORT"
+export GATEWAY_PREFIX="/app/${APP_NAME}"
+export SOCKET_PATH="${APP_DIR}/app.sock"
+export TRIM_PKGVAR="${TRIM_PKGVAR:-$DATA_DIR}"
+# 所有落盘日志集中在 log/ 下，按天命名，启动时清掉过期文件。
+LOG_DIR="${TRIM_PKGVAR}/log"
+LOG_DAY="$(date '+%Y%m%d')"
+SERVER_LOG="${LOG_DIR}/server_${LOG_DAY}.log"
+AGENT_LOG="${LOG_DIR}/agent_${LOG_DAY}.log"
+# 服务与 agent 各自按天写自己的日志文件；不设时日志器仍走 stderr。
+export SHORTCUTS_LOG_DIR="${LOG_DIR}"
+export SHORTCUTS_APP_ROOT="${SHORTCUTS_APP_ROOT:-$APP_DIR}"
+export SHORTCUTS_DATA_FILE="${TRIM_PKGVAR}/shortcuts.json"
+export SHORTCUTS_BUILD_DIR="${TRIM_PKGVAR}/build"
+export SHORTCUTS_TEMPLATE_DIR="${SHORTCUTS_TEMPLATE_DIR:-$APP_DIR/templates}"
+
+export SHORTCUTS_AGENT_SOCKET="${TRIM_PKGVAR}/deploy-agent.sock"
+
+RUN_USER="${TRIM_USERNAME:-}"
+RUN_UID="$(id -u 2>/dev/null || echo 0)"
+BINARY="${APP_DIR}/bin/fnrt"
+
+write_log() {
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >&2 || true
+}
+
+is_running() {
+  local pid_file="$1"
+  local pid
+  [ -f "$pid_file" ] || return 1
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+can_drop_privilege() {
+  [ "$RUN_UID" = "0" ] && [ -n "$RUN_USER" ] && id "$RUN_USER" >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1
+}
+
+LOG_KEEP_DAYS="${SHORTCUTS_LOG_KEEP_DAYS:-7}"
+
+# 只保留最近 N 天的日志，更早的删掉。
+cleanup_old_logs() {
+  find "$LOG_DIR" -maxdepth 1 -type f -name '*.log' -mtime +"$LOG_KEEP_DAYS" -delete 2>/dev/null || true
+}
+
+# 旧版本把日志直接写在数据目录根下。按文件自身日期挪进 log/ 对应名字，
+# 这样它也会按同样的保留天数被清掉，而不是永远留在根目录。mv 保留 mtime。
+migrate_legacy_logs() {
+  local src prefix day dest
+  for src in "$DATA_DIR/install.log" "$DATA_DIR/uninstall.log" "$DATA_DIR/${APP_NAME}-upgrade.log"; do
+    [ -f "$src" ] || continue
+    case "$src" in
+      */install.log) prefix=install ;;
+      */uninstall.log) prefix=uninstall ;;
+      *) prefix=upgrade ;;
+    esac
+    day="$(date -r "$src" '+%Y%m%d' 2>/dev/null || true)"
+    [ -n "$day" ] || day="$(date '+%Y%m%d')"
+    dest="$LOG_DIR/${prefix}_${day}.log"
+    if [ -e "$dest" ]; then
+      cat "$src" >> "$dest" 2>/dev/null || true
+      rm -f "$src" 2>/dev/null || true
+    else
+      mv -f "$src" "$dest" 2>/dev/null || true
+    fi
+  done
+}
+
+prepare_dirs() {
+  ICONS_DIR="${TRIM_PKGVAR}/icons"
+  mkdir -p "$DATA_DIR" "$SHORTCUTS_BUILD_DIR" "$ICONS_DIR" "$LOG_DIR" 2>/dev/null || true
+  migrate_legacy_logs
+  cleanup_old_logs
+  if can_drop_privilege; then
+    chown -R "$RUN_USER" "$SHORTCUTS_BUILD_DIR" 2>/dev/null || true
+    chown -R "$RUN_USER" "$ICONS_DIR" 2>/dev/null || true
+    chown "$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+    [ -f "$SHORTCUTS_DATA_FILE" ] && chown "$RUN_USER" "$SHORTCUTS_DATA_FILE" 2>/dev/null
+  fi
+}
+
+start_agent() {
+  if [ "$RUN_UID" != "0" ]; then
+    write_log "skip agent: not running as root, appcenter-cli will be called directly"
+    return 0
+  fi
+
+  if is_running "$AGENT_PID_FILE"; then
+    write_log "agent already running pid=$(cat "$AGENT_PID_FILE" 2>/dev/null || true)"
+    return 0
+  fi
+
+  rm -f "$SHORTCUTS_AGENT_SOCKET" 2>/dev/null || true
+  nohup env SHORTCUTS_LOG_NAME=agent "$BINARY" agent >> "$AGENT_LOG" 2>&1 &
+  echo $! > "$AGENT_PID_FILE"
+  sleep 1
+
+  if is_running "$AGENT_PID_FILE"; then
+    write_log "agent started pid=$(cat "$AGENT_PID_FILE") socket=$SHORTCUTS_AGENT_SOCKET"
+    return 0
+  fi
+
+  write_log "agent failed to start"
+  return 1
+}
+
+start_server() {
+  stop_by_pid_file "$PID_FILE"
+  pkill -f "${BINARY} server" 2>/dev/null || true
+  rm -f "$SOCKET_PATH" 2>/dev/null || true
+  if can_drop_privilege; then
+    nohup runuser -u "$RUN_USER" -- "$BINARY" server >> "$SERVER_LOG" 2>&1 &
+    echo $! > "$PID_FILE"
+  else
+    write_log "runuser unavailable, server will run as $(id -un 2>/dev/null || echo unknown)"
+    nohup "$BINARY" server >> "$SERVER_LOG" 2>&1 &
+    echo $! > "$PID_FILE"
+  fi
+
+  sleep 1
+
+  if is_running "$PID_FILE"; then
+    write_log "server started pid=$(cat "$PID_FILE") port=$PORT user=${RUN_USER:-current}"
+    return 0
+  fi
+
+  write_log "server failed to start port=$PORT"
+  return 1
+}
+
+stop_by_pid_file() {
+  local pid_file="$1"
+  local pid
+  if [ -f "$pid_file" ]; then
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+  fi
+}
+
+stop_server() {
+  stop_by_pid_file "$PID_FILE"
+  pkill -f "${BINARY} server" 2>/dev/null || true
+  rm -f "$SOCKET_PATH" 2>/dev/null || true
+}
+
+stop_agent() {
+  stop_by_pid_file "$AGENT_PID_FILE"
+  rm -f "$SHORTCUTS_AGENT_SOCKET" 2>/dev/null || true
+}
+
+prepare_dirs
+write_log "invoked cmd=${1:-} user=$(id -un 2>/dev/null || echo unknown) uid=$RUN_UID appDir=$APP_DIR binary=$BINARY"
+
+if [ "$RUN_UID" != "0" ]; then
+  write_log "warning: not running as root, appcenter-cli may fail with rpcbroker permission denied"
+fi
+
+case "${1:-}" in
+  start)
+    start_agent
+    start_server
+    ;;
+  stop)
+    stop_server
+    stop_agent
+    write_log "stopped"
+    ;;
+  status)
+    if is_running "$PID_FILE"; then
+      write_log "server status=running"
+      exit 0
+    fi
+    write_log "server status=stopped"
+    exit 3
+    ;;
+  *)
+    write_log "unknown command=${1:-}"
+    exit 1
+    ;;
+esac

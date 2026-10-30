@@ -1,0 +1,13 @@
+#!/bin/bash
+
+case "${1:-}" in
+  start|stop)
+    exit 0
+    ;;
+  status)
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac

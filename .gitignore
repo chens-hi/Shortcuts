@@ -1,0 +1,8 @@
+# 打包产物与构建产物
+dist/
+shortcuts/app/bin/
+
+# 本地临时与工具目录
+.tmp/
+.zcode/
+.sync_temp_dir/

@@ -1,0 +1,51 @@
+#!/bin/bash
+set -u
+
+DATA_DIR="${TRIM_PKGVAR:-}"
+LOG_DIR="${DATA_DIR:-/tmp}/log"
+LOG_FILE="${LOG_DIR}/uninstall_$(date '+%Y%m%d').log"
+APP_NAME="${TRIM_APPNAME:-shortcuts}"
+CHOICE="${wizard_uninstall_shortcuts:-keep}"
+
+log() {
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+find_binary() {
+  local base
+  for base in "${TRIM_APPDEST:-}" "/var/apps/${APP_NAME}/target" "/var/apps/${APP_NAME}"; do
+    [ -n "$base" ] || continue
+    if [ -x "${base}/bin/fnrt" ]; then
+      printf '%s' "${base}/bin/fnrt"
+      return 0
+    fi
+  done
+  return 1
+}
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+log "uninstall_init: choice=$CHOICE"
+
+if [ "$CHOICE" = "remove" ]; then
+  # 卸载失败不阻断主包自身的卸载。
+  BINARY="$(find_binary || true)"
+  if [ -n "$BINARY" ]; then
+    "$BINARY" cleanup >> "$LOG_FILE" 2>&1 || log "cleanup 失败，部分子应用可能残留"
+  else
+    log "未找到 fnrt 二进制，跳过子应用卸载"
+  fi
+
+  # 明确选择卸载时，清理运行子应用和构建缓存；@appdata 下的主配置保留，便于重装后恢复列表。
+  if [ -n "$DATA_DIR" ]; then
+    if [ -d "${DATA_DIR}/build" ]; then
+      rm -rf -- "${DATA_DIR}/build" 2>/dev/null || true
+    fi
+    log "已删除构建缓存；保留配置：${DATA_DIR}/shortcuts.json"
+  else
+    log "TRIM_PKGVAR 为空，跳过数据清理"
+  fi
+else
+  log "用户选择保留，配置与快捷入口都不动"
+fi
+
+exit 0

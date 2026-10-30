@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="stylesheet" href="/app/shortcuts/styles.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="subtitle" id="subtitle"></p>
+      <div class="header-actions">
+        <span class="badge" id="versionBadge">v1.0.282</span>
+        <button type="button" class="icon-button" id="themeButton" title="" aria-label="">
+          <svg class="theme-light-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+          <svg class="theme-dark-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+        </button>
+      </div>
+    </header>
+    <section class="panel">
+      <div class="panel-head">
+        <h2><span id="configListTitle"></span><span id="entryCount" class="count"></span></h2>
+        <div class="head-buttons">
+          <button type="button" id="addEntryButton"></button>
+        </div>
+      </div>
+      <div id="listNotice" class="empty hidden"></div>
+      <div id="listLoading" class="empty"></div>
+      <div id="listWrap" class="list-wrap hidden">
+        <table class="entry-table" id="entryTable">
+          <colgroup>
+            <col style="width: 34px;">
+            <col style="width: 200px;">
+            <col>
+            <col style="width: 300px;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th class="status-dot-cell"></th>
+              <th></th>
+              <th></th>
+              <th class="col-center"></th>
+            </tr>
+          </thead>
+          <tbody id="entryRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <div class="overlay form-overlay" id="entryFormOverlay" role="dialog" aria-modal="true" aria-labelledby="entryFormTitle">
+    <section class="modal entry-modal">
+      <div class="modal-head">
+        <h2 id="entryFormTitle"></h2>
+        <button type="button" class="close-button" id="entryFormCloseButton" aria-label="">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <form id="entryForm" novalidate>
+        <div class="grid">
+          <label class="field col-4">
+            <span class="field-label" id="appnameLabel"><span id="appnameLabelText"></span><span class="field-label-note" id="appnameNote"></span></span>
+            <input id="formAppname" name="formAppname" required>
+          </label>
+          <label class="field col-4">
+            <span class="field-label" id="displayNameLabel"></span>
+            <input id="displayName" name="displayName" required maxlength="12">
+          </label>
+          <label class="field col-4" id="openModeField">
+            <span class="field-label" id="openModeLabel"></span>
+            <select id="openMode" name="openMode">
+              <option value="iframe"></option>
+              <option value="url" selected></option>
+            </select>
+          </label>
+          <label class="field col-12 hidden type-external" id="urlField">
+            <span class="field-label" id="urlLabel"></span>
+            <input id="url" name="url" placeholder="">
+          </label>
+          <div class="field col-12 hidden type-folder" id="folderPathField">
+            <span class="field-label" id="folderPathLabel"></span>
+            <div class="folder-path-row">
+              <input id="folderPath" name="folderPath" placeholder="">
+              <button type="button" class="folder-browse hidden" id="folderBrowseButton"></button>
+            </div>
+          </div>
+          <label class="field col-4 type-internal">
+            <span class="field-label" id="portLabel"></span>
+            <input id="port" name="port" required inputmode="numeric">
+          </label>
+          <label class="field col-4 type-internal">
+            <span class="field-label" id="protocolLabel"></span>
+            <select id="protocol" name="protocol"><option value="http"></option><option value="https"></option></select>
+          </label>
+          <label class="field col-4 type-internal">
+            <span class="field-label" id="pathLabel"></span>
+            <input id="path" name="path" value="/" required>
+          </label>
+          <div class="field icon-desc-row col-12">
+            <div class="icon-preview-wrap">
+              <label for="displayIcon" class="icon-preview" id="iconPreview" title="">
+                <img alt="" src="/app/shortcuts/icons/child_entry_256.png">
+                <span class="icon-preview-overlay" id="iconPreviewOverlayHint"></span>
+              </label>
+              <button type="button" id="iconClearButton" class="icon-preview-overlay-btn icon-preview-clear hidden" title="" aria-label="">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+              <button type="button" id="iconRestoreButton" class="icon-preview-overlay-btn icon-preview-restore hidden" title="" aria-label="">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+              </button>
+              <button type="button" id="iconCropButton" class="icon-preview-overlay-btn icon-preview-crop hidden" title="" aria-label="">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><line x1="4" y1="4" x2="15.88" y2="15.88"/><line x1="9.53" y1="14.48" x2="4" y2="20"/><line x1="15.88" y1="8.12" x2="12" y2="12"/></svg>
+              </button>
+            </div>
+            <input id="displayIcon" name="displayIcon" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp">
+            <div id="description" class="description-field" contenteditable="true" role="textbox" aria-multiline="true" placeholder=""></div>
+          </div>
+        </div>
+        <div class="form-actions">
+            <button type="button" id="cancelButton"></button>
+            <button type="submit" id="saveButton"></button>
+          </div>
+      </form>
+    </section>
+  </div>
+  <div class="overlay form-overlay" id="typePickerOverlay" role="dialog" aria-modal="true" aria-labelledby="typePickerTitle">
+    <section class="modal type-picker-modal">
+      <div class="modal-head">
+        <h2 id="typePickerTitle"></h2>
+        <button type="button" class="close-button" id="typePickerCloseButton" aria-label="">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <div class="type-picker-grid" id="typePickerGrid">
+        <button type="button" class="type-card" data-type="internal_port">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><path d="M6 6.5h.01M6 17.5h.01"></path></svg>
+          <span class="type-card-label" id="typeCardInternal"></span>
+          <span class="type-card-desc" id="typeCardInternalDesc"></span>
+        </button>
+        <button type="button" class="type-card" data-type="external_url">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+          <span class="type-card-label" id="typeCardExternal"></span>
+          <span class="type-card-desc" id="typeCardExternalDesc"></span>
+        </button>
+        <button type="button" class="type-card" data-type="folder">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>
+          <span class="type-card-label" id="typeCardFolder"></span>
+          <span class="type-card-desc" id="typeCardFolderDesc"></span>
+        </button>
+      </div>
+    </section>
+  </div>
+  <div class="overlay crop-overlay" id="cropOverlay" role="dialog" aria-modal="true" aria-labelledby="cropTitle">
+    <section class="modal crop-modal">
+      <div class="modal-head">
+        <h2 id="cropTitle"></h2>
+        <button type="button" class="close-button" id="cropCloseButton" aria-label="">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <div class="crop-layout">
+        <div class="crop-stage" id="cropStage">
+          <canvas id="cropCanvas" width="256" height="256"></canvas>
+        </div>
+        <div class="crop-controls">
+          <div class="crop-control">
+            <label for="cropScale" id="cropScaleLabel"></label>
+            <input id="cropScale" type="range" min="0" max="100" value="0" step="1">
+          </div>
+          <button type="button" id="cropResetButton"></button>
+          <button type="button" class="primary" id="cropApplyButton"></button>
+          <p class="crop-note" id="cropNote"></p>
+        </div>
+      </div>
+    </section>
+  </div>
+  <div class="overlay operation-overlay" id="operationOverlay" aria-hidden="true">
+    <div class="operation-box" role="status" aria-live="polite">
+      <div class="operation-spinner" aria-hidden="true"></div>
+      <p class="operation-message" id="operationMessage"></p>
+    </div>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/app/shortcuts/shortcuts-i18n.js"></script>
+  <script src="/app/shortcuts/app.js"></script>
+</body>
+</html>

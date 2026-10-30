@@ -1,0 +1,10 @@
+#!/bin/bash
+set -u
+
+LOG_DIR="${TRIM_PKGVAR:-/tmp}/log"
+LOG_FILE="${LOG_DIR}/install_$(date '+%Y%m%d').log"
+
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+printf '%s install_callback: 安装完成\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE" 2>/dev/null || true
+
+exit 0

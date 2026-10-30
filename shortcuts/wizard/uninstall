@@ -1,0 +1,23 @@
+[
+  {
+    "stepTitle": "处理方式",
+    "items": [
+      {
+        "type": "radio",
+        "field": "wizard_uninstall_shortcuts",
+        "label": "已经部署的快捷图标打算怎么处理呢？",
+        "initValue": "keep",
+        "options": [
+          {
+            "label": "卸载它们",
+            "value": "remove"
+          },
+          {
+            "label": "保留它们",
+            "value": "keep"
+          }
+        ]
+      }
+    ]
+  }
+]

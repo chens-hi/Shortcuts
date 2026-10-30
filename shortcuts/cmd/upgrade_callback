@@ -1,0 +1,21 @@
+#!/bin/bash
+
+set -u
+
+# upgrade_callback: restart server to load new binary
+# Use $0 to find our own directory (cmd/), then call main from there
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DATA_DIR="${TRIM_PKGVAR:-/tmp}"
+LOG_DIR="${DATA_DIR}/log"
+LOG_FILE="${LOG_DIR}/upgrade_$(date '+%Y%m%d').log"
+mkdir -p "$LOG_DIR" 2>/dev/null || true
+
+# 旧版本散落在数据目录根下的 .log 由 cmd/main 的 prepare_dirs 统一迁移
+# 到 log/（按文件自身日期命名），这里不再重复处理。
+
+printf '%s upgrade_callback: restarting server\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE" 2>/dev/null || true
+"$SCRIPT_DIR/main" stop >> "$LOG_FILE" 2>&1 || true
+sleep 1
+"$SCRIPT_DIR/main" start >> "$LOG_FILE" 2>&1 || true
+
+exit 0

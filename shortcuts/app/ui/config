@@ -1,0 +1,17 @@
+{
+  ".url": {
+    "shortcuts.setup": {
+      "title": "快捷图标",
+      "icon": "images/icon_{0}.png",
+      "type": "iframe",
+      "protocol": "",
+      "gatewayPrefix": "/app/shortcuts",
+      "gatewaySocket": "app.sock",
+      "url": "/app/shortcuts",
+      "allUsers": false,
+      "control": {
+        "accessPerm": "readonly"
+      }
+    }
+  }
+}

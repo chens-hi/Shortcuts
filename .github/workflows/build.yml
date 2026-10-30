@@ -1,0 +1,105 @@
+name: build
+
+# 运行记录标题固定为 build（默认会显示触发它的提交信息，每次都不同）。
+run-name: build
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths: ['shortcuts/manifest']
+
+permissions:
+  contents: write
+  # 删除旧的工作流运行记录需要 actions:write。
+  actions: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Ubuntu runner 分配远快于 Windows，且 fnpack 官方提供 linux-amd64 版本；
+    # 本地 Windows 打包走 tools\ 里的 fnpack-*-windows-amd64.exe，互不影响。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Read version and desc from manifest
+        id: ver
+        shell: pwsh
+        run: |
+          $line = (Get-Content shortcuts/manifest) -match '^version=' | Select-Object -First 1
+          $v = ($line -split '=', 2)[1].Trim()
+          "version=$v" >> $env:GITHUB_OUTPUT
+          $desc = ((Get-Content shortcuts/manifest) -match '^desc=' | Select-Object -First 1) -replace '^desc=', ''
+          "desc=$desc" >> $env:GITHUB_OUTPUT
+
+      - name: Sync and validate
+        shell: pwsh
+        run: |
+          ./tools/sync-version.ps1
+          ./tools/validate-ui.ps1
+
+      - name: Build and package (linux-amd64 + linux-arm64)
+        shell: pwsh
+        run: ./tools/package-shortcuts.ps1
+
+      - name: Verify package
+        shell: pwsh
+        run: ./tools/check-package.ps1 -PackagePath "dist/shortcuts-${{ steps.ver.outputs.version }}-linux-amd64.fpk"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: shortcuts-${{ steps.ver.outputs.version }}-fpk
+          path: dist/*.fpk
+          if-no-files-found: error
+
+      - name: Publish to Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ steps.ver.outputs.desc }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $tag = "latest"
+          $sha = "${{ github.sha }}"
+          # 只维护一个挂在固定 latest tag 上的 Release：不存在则创建。
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release create $tag --title $tag --notes "$env:RELEASE_NOTES" --target $sha }
+          # 清空旧资产再上传，Release 里只保留本次构建的包。
+          $oldAssets = @(gh release view $tag --json assets --jq '.assets[].name') | Where-Object { $_ }
+          foreach ($name in $oldAssets) { gh release delete-asset $tag $name --yes }
+          $files = @(Get-ChildItem dist -Filter 'shortcuts-*.fpk').FullName
+          gh release upload $tag $files --clobber
+          # 把 latest tag 强制挪到本次提交。
+          gh api -X PATCH "repos/$repo/git/refs/tags/$tag" -f sha="$sha" -F force=true | Out-Null
+          # 删除历史遗留的其它 Release 及其 tag。
+          $oldReleases = @(gh api "repos/$repo/releases" --paginate --jq '.[].tag_name') | Where-Object { $_ -and $_ -ne $tag }
+          foreach ($t in $oldReleases) { gh release delete $t --cleanup-tag --yes }
+          # 清理没有 Release 的游离 tag，保证 tag 列表只剩 latest。
+          $orphanTags = @(gh api "repos/$repo/git/matching-refs/tags/" --paginate --jq '.[].ref') |
+            ForEach-Object { ($_ -replace 'refs/tags/', '') } |
+            Where-Object { $_ -and $_ -ne $tag }
+          foreach ($t in $orphanTags) { gh api -X DELETE "repos/$repo/git/refs/tags/$t" }
+          Write-Output "Published $($files.Count) assets to release $tag (tag -> $sha)"
+
+      - name: Cleanup old workflow runs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $current = "${{ github.run_id }}"
+          # 发布成功后只保留当前这条运行记录，更早的 push/dispatch 构建全部删除。
+          $oldRuns = @(gh api "repos/$repo/actions/runs?per_page=100" --paginate --jq '.workflow_runs[].id') |
+            Where-Object { "$_" -ne $current }
+          foreach ($id in $oldRuns) { gh api -X DELETE "repos/$repo/actions/runs/$id" }
+          Write-Output "Deleted $($oldRuns.Count) old workflow run(s); kept run $current"
