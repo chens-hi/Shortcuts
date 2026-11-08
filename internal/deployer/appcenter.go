@@ -53,7 +53,6 @@ type AppCenter interface {
 	Stop(appName string) CommandResult
 	Uninstall(appName string) CommandResult
 	Ping() (bool, CommandResult)
-	StatDir(dir string) CommandResult
 }
 
 // Settings 只保留真正被读到的东西。此前还有四个字段：BuildDir 与 AppRoot
@@ -149,20 +148,6 @@ func (m *Manager) Ping() (bool, CommandResult) {
 	}
 	resp := m.callAgent(Command{Action: "ping"})
 	return resp.OK, resp
-}
-
-// statDirAgentTimeout 是 stat-dir 单次 agent 调用的超时上限。stat 不启动任何
-// CLI，正常毫秒级返回；给一个远小于 DefaultCLITimeout（600s）的上限，避免
-// agent 侧被其它卡住的命令拖累时，路径校验也拖到分钟级才反馈。上限须小于
-// 前端 validateFolderPath 的 15s 超时，让后端先返回而不是前后端竞相判超时。
-const statDirAgentTimeout = 10 * time.Second
-
-// StatDir 校验一个目录真实存在且是目录。server 进程按 TRIM_USERNAME 降权运行，
-// 对 /vol1 下的共享目录没有读权限，直接 os.Stat 会对真实目录误报失败；存在性
-// 必须由 root agent 判定。agent 不可用时不回落直连——本机进程同样没权限，
-// 直连只会把「真实存在」误判成失败，所以直接向调用方报告不可用。
-func (m *Manager) StatDir(dir string) CommandResult {
-	return m.callAgentWithTimeout(Command{Action: "stat-dir", Dir: dir}, statDirAgentTimeout)
 }
 
 func (m *Manager) runCli(args []string) CommandResult {

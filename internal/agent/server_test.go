@@ -145,37 +145,3 @@ func TestResolveInstallDirEmptyMainAppname(t *testing.T) {
 		t.Fatal("resolveInstallDir accepted with empty MainAppname")
 	}
 }
-
-func TestStatDir(t *testing.T) {
-	// 用 /tmp 前缀：Windows 下 Go 解析为当前盘符的 \tmp（其他测试已验证），
-	// Linux 下即 /tmp，两边都能真实创建且通过 IsValidFolderPath 的 / 开头校验。
-	real := "/tmp/shortcuts-agent-stat-" + t.Name()
-	if err := os.MkdirAll(real, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(real) })
-	for _, tc := range []struct {
-		name string
-		path string
-		want bool
-	}{
-		{"real dir", real, true},
-		{"nonexistent", filepath.Join(real, "不存在"), false},
-		{"file is not a dir", filepath.Join(real, "file.txt"), false},
-		{"root rejected", "/", false},
-		{"relative rejected", "vol1/1000", false},
-		{"empty rejected", "", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "file is not a dir" {
-				if err := os.WriteFile(tc.path, []byte("x"), 0644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			got := statDir(tc.path)
-			if got.OK != tc.want {
-				t.Errorf("statDir(%q).OK = %v, want %v (err=%s)", tc.path, got.OK, tc.want, got.Error)
-			}
-		})
-	}
-}

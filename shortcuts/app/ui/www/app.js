@@ -4,15 +4,6 @@
 
     const DEPLOY_LABELS = T.dynamic.status;
 
-    const FOLDER_STATUS_LABELS = {
-
-      undeployed: T.dynamic.status.folderUndeployed,
-
-      deployed: T.dynamic.status.folderDeployed,
-
-      desktop_missing: T.dynamic.status.desktopMissing,
-
-    };
 
     const RUNTIME_LABELS = T.dynamic.runtime;
 
@@ -67,12 +58,7 @@
     const urlInput = document.querySelector("#url");
 
     const urlField = document.getElementById("urlField");
-
-    const folderPathInput = document.querySelector("#folderPath");
-
-    const folderBrowseButton = document.getElementById("folderBrowseButton");
-
-    const openModeField = document.getElementById("openModeField");
+;
 
     const descriptionInput = document.querySelector("#description");
 
@@ -160,7 +146,6 @@
     const FORM_TYPE_LABELS = {
       internal_port: T.html.typeInternalPort,
       external_url: T.html.typeExternalUrl,
-      folder: T.html.typeFolder,
     };
 
 
@@ -931,711 +916,13 @@
 
       const isExternal = type === 'external_url';
 
-      const isFolder = type === 'folder';
-
-      document.querySelectorAll('.type-internal').forEach(el => el.classList.toggle('hidden', isExternal || isFolder));
+      document.querySelectorAll('.type-internal').forEach(el => el.classList.toggle('hidden', isExternal));
 
       document.querySelectorAll('.type-external').forEach(el => el.classList.toggle('hidden', !isExternal));
 
-      document.querySelectorAll('.type-folder').forEach(el => el.classList.toggle('hidden', !isFolder));
-
-      // 文件夹类型固定 iframe：SDK 只在飞牛桌面宿主内可用，不给选打开方式。
-      // 这两块用 .ghosted 占位而非 display:none：弹窗高度按最高页签渲染，切换页签才不会跳动。
-      if (openModeField) openModeField.classList.toggle('ghosted', isFolder);
-
-      // 桌面项用系统文件夹图标、不需要描述：图标与描述同属一行，folder 下整行占位隐藏。
-      const iconDescRow = document.querySelector(".icon-desc-row");
-
-      if (iconDescRow) iconDescRow.classList.toggle("ghosted", isFolder);
-
       urlInput.required = isExternal;
 
-      portInput.required = !isExternal && !isFolder;
-
-      if (folderPathInput) folderPathInput.required = isFolder;
-
-      if (isFolder) updateFolderBrowseButton();
-
-    }
-
-
-
-    // 桌面宿主桥：懒加载 @trimjs/web-app，选目录器与桌面项生命周期共用。
-    // SDK 只在飞牛桌面宿主内可用（独立浏览器 isStandaloneWeb=true），加载
-    // 失败或环境不支持时按钮保持隐藏，路径手动输入始终可用。
-    let hostAppState = "unloaded";
-
-    let hostApp = null;
-
-    // 并发调用共享同一次加载：否则后到的调用者会在 await import 期间看到
-    // 中间态 "loading"，被调用点当成「不可用」而误报「仅桌面端可用」。
-    let hostAppPromise = null;
-
-    async function ensureHostApp() {
-
-      if (!hostAppPromise) hostAppPromise = loadHostApp();
-
-      return hostAppPromise;
-
-    }
-
-    async function loadHostApp() {
-
-      hostAppState = "loading";
-
-      try {
-
-        const mod = await import(API_BASE + "/sdk/trim-web-app.js");
-
-        const app = new mod.TrimApp();
-
-        if (app.isStandaloneWeb) {
-
-          hostAppState = "unavailable";
-
-        } else {
-
-          hostApp = app;
-
-          hostAppState = "ready";
-
-        }
-
-      } catch (_) {
-
-        hostAppState = "unavailable";
-
-      }
-
-      return hostAppState;
-
-    }
-
-    async function ensureFolderPicker() {
-
-      return ensureHostApp();
-
-    }
-
-    const DESKTOP_REQ = {
-
-      list: "appcgi.sac.entry.v1.getUserDesktop",
-
-      add: "appcgi.sac.entry.v1.addUserDesktopEntry",
-
-      del: "appcgi.sac.entry.v1.delUserDesktopEntry",
-
-    };
-
-
-    // 桌面收到这条 domainEvent 才会重拉图标列表。事件名与来源是桌面内部约定，
-    // 对不上就只是不刷新，不会报错；事件失效时界面静默降级，下次操作刷新列表。
-    const DESKTOP_EVENT = { entryChange: "user-desktop-entry-change", from: "trim-sac" };
-
-    // 宿主桥代发的请求走桌面页自己那条 ?type=main 连接，连接对象要缓存，
-    // 桌面对不到它就不会收到我们合成的广播。
-    let hostMainSocket = null;
-
-    let desktopNoticeTimer = null;
-
-    async function captureHostMainSocket() {
-
-      let proto = null;
-
-      try {
-
-        proto = window.top.WebSocket.prototype;
-
-      } catch (_) {
-
-        return null;
-
-      }
-
-      if (!proto || typeof proto.send !== "function") return null;
-
-      const originalSend = proto.send;
-
-      const tapped = [];
-
-      const tap = function (data) {
-
-        if (tapped.indexOf(this) < 0) tapped.push(this);
-
-        return originalSend.apply(this, arguments);
-
-      };
-
-      try {
-
-        proto.send = tap;
-
-      } catch (_) {
-
-        // 只读但可配置的属性只能用 defineProperty 覆盖。
-        try {
-
-          Object.defineProperty(proto, "send", { value: tap, writable: true, configurable: true });
-
-        } catch (__) {
-
-          return null;
-
-        }
-
-      }
-
-      try {
-
-        // 桥调用会被转成桌面连接上的一次 send，这就是抓到连接的手段。
-        await hostApp.query({ req: DESKTOP_REQ.list, data: { language: "zh-CN" } });
-
-      } catch (_) {
-
-        // 抓到连接就够了，查询本身失败不影响补投。
-
-      } finally {
-
-        // 无论成败都要还原，绝不能让桌面长期跑在包装函数上。
-        try {
-
-          proto.send = originalSend;
-
-        } catch (_) {
-
-          try {
-
-            Object.defineProperty(proto, "send", { value: originalSend, writable: true, configurable: true });
-
-          } catch (__) {}
-
-        }
-
-        if (proto.send !== originalSend) console.warn("desktop socket prototype not restored");
-
-      }
-
-      return tapped.find((socket) => /type=main/.test(String(socket.url || ""))) || null;
-
-    }
-
-    async function injectDesktopEntryChange() {
-
-      if ((await ensureHostApp()) !== "ready") return;
-
-      // 桌面重连会换掉连接对象，旧对象的 readyState 变成关闭态，这里就会重新抓。
-      if (!hostMainSocket || hostMainSocket.readyState !== 1) hostMainSocket = await captureHostMainSocket();
-
-      if (!hostMainSocket || hostMainSocket.readyState !== 1) return;
-
-      const frame = JSON.stringify({ domainEvent: { event: DESKTOP_EVENT.entryChange, from: DESKTOP_EVENT.from, body: "{}" } });
-
-      try {
-
-        if (typeof hostMainSocket.onmessage === "function") {
-
-          hostMainSocket.onmessage({ data: frame });
-
-        } else {
-
-          // 桌面若改用 addEventListener 挂载，只能派发事件才能命中监听。
-          hostMainSocket.dispatchEvent(new MessageEvent("message", { data: frame }));
-
-        }
-
-      } catch (_) {
-
-        hostMainSocket = null;
-
-      }
-
-    }
-
-    function notifyDesktopEntryChanged() {
-
-      // 重建会先删后建，同一轮里只补投一次，避免连续两次重拉。
-      if (desktopNoticeTimer) return;
-
-      desktopNoticeTimer = setTimeout(() => {
-
-        desktopNoticeTimer = null;
-
-        // 补投是纯增强：拿不到连接或帧被宿主忽略时保持静默，不影响正常操作。
-        injectDesktopEntryChange().catch(() => {});
-
-      }, 300);
-
-    }
-
-    let desktopIndex = null;
-
-    function hostErrorMessage(response) {
-
-      if (!response) return T.dynamic.messages.desktopItemHostOnly;
-
-      const parts = [];
-
-      if (response.result) parts.push("result=" + response.result);
-
-      if (response.errno) parts.push("errno=" + response.errno);
-
-      if (response.errmsg) parts.push("errmsg=" + response.errmsg);
-
-      return parts.join(" ").slice(0, 300) || T.dynamic.messages.desktopItemCreateFailed;
-
-    }
-
-    async function loadDesktopIndex() {
-
-      if ((await ensureHostApp()) !== "ready") {
-
-        desktopIndex = null;
-
-        return null;
-
-      }
-
-      try {
-
-        const response = await hostApp.query({ req: DESKTOP_REQ.list, data: { language: "zh-CN" } });
-
-        if (!response || response.result !== "succ" || !response.data || !Array.isArray(response.data.list)) {
-
-          desktopIndex = null;
-
-          return null;
-
-        }
-
-        const index = new Map();
-
-        for (const item of response.data.list) {
-
-          if (!item || !item.entryKey) continue;
-
-          index.set(item.entryKey, { name: item.name || "", folderPath: item.folderPath || "" });
-
-        }
-
-        desktopIndex = index;
-
-        return index;
-
-      } catch (error) {
-
-        console.warn("load desktop items failed", error && error.message);
-
-        desktopIndex = null;
-
-        return null;
-
-      }
-
-    }
-
-    function folderEntryStatus(entry) {
-
-      if (entry.type !== "folder") return entry.status || "undeployed";
-
-      if (!entry.desktopEntryKey) return "undeployed";
-
-      // 索引拿不到时不臆测：按服务端记录显示，避免把"查询失败"显示成"已丢失"。
-      if (desktopIndex && !desktopIndex.has(entry.desktopEntryKey)) return "desktop_missing";
-
-      return "deployed";
-
-    }
-
-    async function saveDesktopEntryKey(appname, key) {
-
-      const response = await fetchJsonWithTimeout(`${API_BASE}/api/entries/${encodeURIComponent(appname)}/desktop-item`, {
-
-        method: "PUT",
-
-        headers: { "Content-Type": "application/json" },
-
-        body: JSON.stringify({ entryKey: key }),
-
-        timeoutMs: 15000,
-
-      });
-
-      if (!response.ok) {
-
-        const data = await response.json().catch(() => ({}));
-
-        throw new Error(data.detail || data.error || "回写桌面项标识失败");
-
-      }
-
-      return response.json();
-
-    }
-
-    async function clearDesktopEntryKey(appname) {
-
-      const response = await fetchJsonWithTimeout(`${API_BASE}/api/entries/${encodeURIComponent(appname)}/desktop-item`, {
-
-        method: "DELETE",
-
-        timeoutMs: 15000,
-
-      });
-
-      if (!response.ok) {
-
-        const data = await response.json().catch(() => ({}));
-
-        throw new Error(data.detail || data.error || "清空桌面项标识失败");
-
-      }
-
-      return response.json();
-
-    }
-
-    async function deleteDesktopItemByKey(key) {
-
-      const response = await hostApp.query({ req: DESKTOP_REQ.del, data: { entryKey: key } });
-
-      if (!response || response.result !== "succ") throw new Error(hostErrorMessage(response));
-
-    }
-
-    async function createDesktopItem(entry) {
-
-      if ((await ensureHostApp()) !== "ready") throw new Error(T.dynamic.messages.desktopItemHostOnly);
-
-      if (!desktopIndex) await loadDesktopIndex();
-
-      // 索引不可用时不重复创建：宁可不动，也不在桌面留下两个同名项。
-      if (entry.desktopEntryKey && (!desktopIndex || desktopIndex.has(entry.desktopEntryKey))) {
-
-        return entry.desktopEntryKey;
-
-      }
-
-      if (desktopIndex) {
-
-        // 服务端数据被清但桌面项还在时，按名称+路径认领，避免重复创建。
-        for (const [key, item] of desktopIndex) {
-
-          // 同名同路径的桌面项可能已经属于另一条条目：抢过来会让对方的图标凭空消失。
-          const claimed = currentEntries.some((e) => e.appname !== entry.appname && e.desktopEntryKey === key);
-
-          if (!claimed && item.name === entry.displayName && item.folderPath === entry.path) {
-
-            await saveDesktopEntryKey(entry.appname, key);
-
-            return key;
-
-          }
-
-        }
-
-      }
-
-      const response = await hostApp.query({
-
-        req: DESKTOP_REQ.add,
-
-        data: { itemType: "folder", name: entry.displayName, folderPath: entry.path, sort: 999999 },
-
-      });
-
-      if (!response || response.result !== "succ") throw new Error(hostErrorMessage(response));
-
-      const key = response.data && response.data.entryKey;
-
-      if (!key) throw new Error("宿主返回里没有 entryKey");
-
-      try {
-
-        await saveDesktopEntryKey(entry.appname, key);
-
-      } catch (error) {
-
-        let rollbackFailed = false;
-
-        // 回写失败就把刚创建的项删掉，避免界面上看不见、桌面上删不掉的孤儿。
-        await deleteDesktopItemByKey(key).catch((rollbackError) => {
-
-          // 回滚也失败时桌面项会留下来，而界面已拿不到它的 key，只能留痕待手工清理。
-          console.warn("desktop item rollback failed", rollbackError);
-
-          rollbackFailed = true;
-
-        });
-
-        // 图标确实留在桌面，用户必须在失败提示里看到处理办法，不能只写日志。
-        if (rollbackFailed) {
-
-          const cleanupHint = formatText(T.dynamic.messages.desktopItemManualCleanup, { target: entry.displayName });
-
-          if (error instanceof Error) {
-
-            error.message = `${error.message} ${cleanupHint}`;
-
-          } else {
-
-            throw new Error(cleanupHint);
-
-          }
-
-        }
-
-        throw error;
-
-      }
-
-      notifyDesktopEntryChanged();
-
-      return key;
-
-    }
-
-    async function removeDesktopItem(entry) {
-
-      if (!entry.desktopEntryKey) return;
-
-      if ((await ensureHostApp()) !== "ready") throw new Error(T.dynamic.messages.desktopItemHostOnly);
-
-      const response = await hostApp.query({ req: DESKTOP_REQ.del, data: { entryKey: entry.desktopEntryKey } });
-
-      // 删除请求失败也可能已经删掉了；用实时列表确认，而不是只看 result。
-      const index = await loadDesktopIndex();
-
-      if (index && index.has(entry.desktopEntryKey)) throw new Error(hostErrorMessage(response));
-
-      if (!index && (!response || response.result !== "succ")) throw new Error(hostErrorMessage(response));
-
-      await clearDesktopEntryKey(entry.appname);
-
-      notifyDesktopEntryChanged();
-
-    }
-
-    async function rebuildDesktopItem(entry) {
-
-      // 旧项没确认消失前不能清 key：否则服务端记成「未创建」，桌面项却还在，
-      // 再创建时名字/路径已变就认领不上，会留下新旧两个项。
-      let removalConfirmed = !entry.desktopEntryKey;
-
-      try {
-
-        await removeDesktopItem(entry);
-
-        removalConfirmed = true;
-
-        // 移除已清服务端 key；沿用旧 key 会让创建命中「索引不可用视为已创建」的分支，
-        // 结果什么都没建却提示已创建。
-        await createDesktopItem({ ...entry, desktopEntryKey: null });
-
-        await loadDesktopIndex();
-
-        showNotice(formatText(T.dynamic.messages.desktopItemCreated, { target: entry.displayName }), "ok");
-
-      } catch (error) {
-
-        const failureMessage = removalConfirmed
-
-          ? T.dynamic.messages.desktopItemCreateFailed
-
-          : T.dynamic.messages.desktopItemRemoveFailed;
-
-        if (removalConfirmed) {
-
-          // 创建/回写失败时旧项已经不在了，残留的 key 只会让条目显示成「已创建」。
-          await clearDesktopEntryKey(entry.appname).catch(() => {});
-
-        }
-
-        await loadDesktopIndex();
-
-        showNotice(userMessage(ERROR_CODES.DEPLOY, failureMessage, errorDetail(error)), "warn");
-
-      } finally {
-
-        refreshListSilently();
-
-      }
-
-    }
-
-    async function removeDesktopItemById(id, button) {
-
-      const entry = currentEntries.find((item) => item.appname === id);
-
-      if (!entry) return;
-
-      if (button) button.disabled = true;
-
-      showOperationOverlay(formatText(T.dynamic.operation.running, { name: T.dynamic.action.removeDesktopItem }));
-
-      try {
-
-        await removeDesktopItem(entry);
-
-        await loadDesktopIndex();
-
-        showNotice(formatText(T.dynamic.messages.desktopItemRemoved, { target: entry.displayName }), "ok");
-
-        refreshListSilently();
-
-      } catch (error) {
-
-        showNotice(userMessage(ERROR_CODES.UNINSTALL, T.dynamic.messages.desktopItemRemoveFailed, errorDetail(error)), "warn");
-
-      } finally {
-
-        hideOperationOverlay();
-
-        if (button) button.disabled = false;
-
-      }
-
-    }
-
-    function updateFolderBrowseButton() {
-
-      if (!folderBrowseButton) return;
-
-      ensureFolderPicker().then((state) => {
-
-        const ready = state === "ready";
-
-        folderBrowseButton.classList.toggle("hidden", !ready);
-
-        // 路径始终允许手动输入：手填路径在保存时经 root agent 校验存在性
-        // （/api/validate-folder），不依赖宿主；「浏览」只是快捷填法。
-        // 宿主不可用（独立浏览器）时按钮隐藏，但手填与校验不受影响。
-
-      });
-
-    }
-
-    // 从 pickFile 的返回里提取路径。官方类型是 {code,msg,data:string[]}，
-    // 但真机上主机返回的形状可能不同（嵌套对象、单项字符串等），
-    // 这里按宽松顺序取第一个非空路径，取不到交给调用方报错。
-    function extractPickedFolder(result) {
-
-      if (!result) return "";
-
-      let list = [];
-
-      if (typeof result === "string") list = [result];
-
-      else if (Array.isArray(result)) list = result;
-
-      else if (Array.isArray(result.data)) list = result.data;
-
-      else if (result.data && typeof result.data === "string") list = [result.data];
-
-      for (const item of list) {
-
-        if (typeof item === "string" && item.trim()) return item.trim();
-
-        if (item && typeof item === "object") {
-
-          for (const key of ["path", "filePath", "fullPath", "dir"]) {
-
-            if (typeof item[key] === "string" && item[key].trim()) return item[key].trim();
-
-          }
-
-        }
-
-      }
-
-      return "";
-
-    }
-
-    async function browseFolderPath() {
-
-      if (!hostApp || !folderPathInput) return;
-
-      // 真机踩坑记录（pickUserFile 对第三方应用不可用）：
-      // ① pickUserFile 确认后走主机授权登记，第三方应用实测必报「应用鉴权异常」
-      //    （补全 api-scope、卸载重装均无效）；
-      // ② pickUserFile 参数校验与文档不一致，缺 sidebarGroup 会报 10030。
-      // 本应用只需要拿到路径字符串（openFileManager 官方明确不做权限校验，
-      // 后端不读该目录），根本不需要授权登记，所以只调免授权的 pickFile。
-      // 不用 pickUserFile 回退：它对第三方应用本就不可用，回退只会再弹一次选择器。
-      // 选择器关闭/取消也走这里：返回空或「Operation failed」都没有路径，
-      // 一律静默返回，不弹错误提示、不重试（快速关闭会被误判成“没弹窗”而重弹）。
-      let result;
-
-      try {
-
-        result = await hostApp.pickFile({ directory: true });
-
-      } catch (err) {
-
-        // 选择器关闭/取消会 reject 一个空值，不是错误：静默返回，不弹提示。
-        // 只有带明确信息的拒绝（方法不可用/参数被宿主拒绝）才提示。
-        const detail = String(((err && err.message) || err || "")).trim();
-
-        if (!detail) return;
-
-        showGeneralToast(formatText(T.dynamic.errors.folderPickFailed, { detail: detail.slice(0, 120) }));
-
-        return;
-
-      }
-
-      if (!result) return;
-
-      const picked = extractPickedFolder(result);
-
-      // 根目录是宿主的默认起始位置，不是用户的选择：选它等于没选，不填充。
-      if (!picked || picked === "/") return;
-
-      folderPathInput.value = picked;
-
-      folderPathInput.classList.remove("invalid");
-
-    }
-
-    // 保存前校验手填的文件夹路径真实存在且是目录。存在性由 root agent 判定
-    // （server 降权进程读不到 /vol1 共享目录，自己 stat 会误报）；agent 不可用
-    // 返回 code="unavailable"，调用方 fail-closed，不放行可能不存在的路径。
-    // 返回的是机器码 code，由调用方映射 i18n 文案——服务端的 reason 是人读
-    // 英文，直接显示会出英文 toast。
-    async function validateFolderPath(path) {
-
-      try {
-
-        // 服务端 stat-dir 上限 10s（statDirAgentTimeout），这里给 15s 让后端先返回，
-        // 避免前端超时与后端各自判超时造成竞态（前端 10s 放弃、后端仍持有写锁）。
-        const response = await fetchJsonWithTimeout(`${API_BASE}/api/validate-folder?path=${encodeURIComponent(path)}`, { timeoutMs: 15000 });
-
-        const data = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-
-          return { valid: false, code: "unavailable" };
-
-        }
-
-        return { valid: !!data.valid, code: data.code || "not_found" };
-
-      } catch (_) {
-
-        return { valid: false, code: "unavailable" };
-
-      }
-
-    }
-
-    // 把校验结果码映射成用户文案。
-    function folderValidationMessage(code) {
-
-      if (code === "bad_format") return T.dynamic.errors.folderBadFormat;
-
-      if (code === "unavailable") return T.dynamic.errors.folderValidateUnavailable;
-
-      return T.dynamic.errors.folderNotExist;
+      portInput.required = !isExternal;
 
     }
 
@@ -1657,7 +944,6 @@
 
       urlInput.value = "";
 
-      if (folderPathInput) folderPathInput.value = "";
 
       portInput.value = "";
 
@@ -1698,8 +984,6 @@
         openModeInput.value = entry.openMode || (entry.config && entry.config.openMode) || "iframe";
 
         urlInput.value = entry.url || (entry.config && entry.config.url) || "";
-
-        if (folderPathInput) folderPathInput.value = entry.path || (entry.config && entry.config.path) || "";
 
         setDescriptionValue(entry.description || "");
 
@@ -1838,14 +1122,13 @@
     const DRAG_HANDLE_ICON = '<svg viewBox="0 0 12 18" aria-hidden="true" draggable="false"><circle cx="4" cy="4" r="1.4"></circle><circle cx="8" cy="4" r="1.4"></circle><circle cx="4" cy="9" r="1.4"></circle><circle cx="8" cy="9" r="1.4"></circle><circle cx="4" cy="14" r="1.4"></circle><circle cx="8" cy="14" r="1.4"></circle></svg>';
 
     // 类型图标：与「新增配置」类型选择弹窗里的一致，列表里放在目标值前面，
-    // 让端口号 / 链接 / 路径 一眼能分清类型，不必回去看名字猜。
+    // 让不同类型的入口一眼能分清，不必回去看名字猜。
     const TYPE_ICONS = {
 
       internal_port: '<rect x="2" y="3" width="20" height="7" rx="2"></rect><rect x="2" y="14" width="20" height="7" rx="2"></rect><path d="M6 6.5h.01M6 17.5h.01"></path>',
 
       external_url: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>',
 
-      folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path>',
 
     };
 
@@ -1853,8 +1136,6 @@
 
       const target = entry.type === "external_url"
         ? (entry.url || "")
-        : entry.type === "folder"
-          ? (entry.path || "")
           : (entry.port || "");
 
       const icon = TYPE_ICONS[entry.type] || TYPE_ICONS.internal_port;
@@ -1866,38 +1147,6 @@
     function renderActions(entry) {
 
       const id = escapeHtml(entry.appname);
-
-      if (entry.type === "folder") {
-
-        const status = folderEntryStatus(entry);
-
-        // 已知宿主不可用时把动作按钮置灰；首次渲染时状态还是 unloaded，
-        // 按钮可用，点击后 createDesktopItem 会给出"请在桌面中打开"的提示。
-        const disabled = hostAppState === "unavailable" ? " disabled" : "";
-
-        const parts = [];
-
-        if (status === "undeployed") {
-
-          parts.push(`<button type="button" class="action-button primary"${disabled} data-deploy="${id}">${T.dynamic.action.createDesktopItem}</button>`);
-
-        } else if (status === "desktop_missing") {
-
-          parts.push(`<button type="button" class="action-button primary"${disabled} data-deploy="${id}">${T.dynamic.action.recreateDesktopItem}</button>`);
-
-        } else {
-
-          parts.push(`<button type="button" class="action-button ghost-danger"${disabled} data-remove-desktop="${id}">${T.dynamic.action.removeDesktopItem}</button>`);
-
-        }
-
-        parts.push(`<button type="button" class="action-button" data-edit="${id}">${T.dynamic.action.edit}</button>`);
-
-        parts.push(`<button type="button" class="action-button ghost-danger" data-delete="${id}">${T.dynamic.action.delete}</button>`);
-
-        return `<div class="entry-actions">${parts.join("")}</div>`;
-
-      }
 
       const deployment = entry.deployment || entry.status || "undeployed";
 
@@ -1946,25 +1195,18 @@
 
       outdated: "warn",
 
-      desktop_missing: "warn",
 
     };
 
     function renderStatusDot(entry) {
 
-      const isFolder = entry.type === "folder";
+      const deployment = entry.deployment || entry.status || "undeployed";
 
-      const deployment = isFolder
-        ? folderEntryStatus(entry)
-        : (entry.deployment || entry.status || "undeployed");
-
-      const label = isFolder
-        ? (FOLDER_STATUS_LABELS[deployment] || deployment)
-        : (DEPLOY_LABELS[deployment] || deployment);
+      const label = DEPLOY_LABELS[deployment] || deployment;
 
       const tone = STATUS_DOT_TONES[deployment] || "danger";
 
-      const runtime = isFolder ? "" : (entry.runtime || "");
+      const runtime = entry.runtime || "";
 
       const runtimeLabel = runtime && deployment !== "undeployed" ? RUNTIME_LABELS[runtime] : "";
 
@@ -2041,18 +1283,6 @@
 
       renderEntries(currentEntries);
 
-      if (currentEntries.some((entry) => entry.type === "folder")) {
-
-        // 索引是异步的：先按服务端状态渲染，拿到桌面列表后再覆盖"丢失"状态。
-        loadDesktopIndex().then(() => {
-
-          if (!options.force && (isReordering || isSavingOrder)) return;
-
-          if (currentEntries.some((entry) => entry.type === "folder")) renderEntries(currentEntries);
-
-        });
-
-      }
 
       return currentEntries;
 
@@ -2374,42 +1604,6 @@
 
         };
 
-      } else if (payload.type === 'folder') {
-
-        const rawFolderPath = folderPathInput.value.trim();
-
-        if (!rawFolderPath) {
-
-          markInvalid(folderPathInput);
-
-          showGeneralToast(T.dynamic.errors.requiredPath);
-
-          return;
-
-        }
-
-        // 手填路径保存前校验真实存在且是目录：root agent 判定，fail-closed。
-        // 「浏览」选出的路径天然存在，也会走这里，多一次确认无副作用。
-        const folderCheck = await validateFolderPath(rawFolderPath);
-
-        if (!folderCheck.valid) {
-
-          markInvalid(folderPathInput);
-
-          showGeneralToast(folderValidationMessage(folderCheck.code));
-
-          return;
-
-        }
-
-        payload.path = rawFolderPath;
-
-        payload.config = {
-
-          path: rawFolderPath,
-
-        };
-
       } else {
 
         const port = portInput.value.trim();
@@ -2473,11 +1667,6 @@
 
       }
 
-      const editSnapshot = currentEditAppname
-
-        ? currentEntries.find((item) => item.appname === currentEditAppname)
-
-        : null;
 
       const hasIcon = !!(payload.icon64Data || payload.icon256Data);
 
@@ -2584,24 +1773,6 @@
 
         refreshListSilently();
 
-        const nextPath = payload.config && payload.config.path;
-
-        const needsDesktopRebuild = editSnapshot
-
-          && editSnapshot.type === "folder"
-
-          && editSnapshot.desktopEntryKey
-
-          && (editSnapshot.displayName !== payload.displayName || editSnapshot.path !== nextPath);
-
-        if (needsDesktopRebuild) {
-
-          // 重建带自己的提示与刷新：失败时若旧项已确认移除则 key 已清空、列表显示「未创建」，
-          // 否则保留 key 让图标仍可被移除。
-          rebuildDesktopItem({ ...editSnapshot, displayName: payload.displayName, path: nextPath }).catch(() => {});
-
-        }
-
       } catch (error) {
 
         showGeneralToast(userMessage(ERROR_CODES.SAVE, T.dynamic.messages.saveFailed, errorDetail(error)));
@@ -2617,16 +1788,6 @@
     }
 
     async function deployEntry(id, button) {
-
-      const targetEntry = currentEntries.find((item) => item.appname === id);
-
-      if (targetEntry && targetEntry.type === "folder") {
-
-        await deployFolderEntry(targetEntry, button);
-
-        return;
-
-      }
 
       const noun = button.textContent.includes(T.dynamic.action.update) ? T.dynamic.action.update : T.dynamic.action.deploy;
 
@@ -2736,46 +1897,6 @@
 
     }
 
-    async function deployFolderEntry(entry, button) {
-
-      const noun = entry.desktopEntryKey ? T.dynamic.action.recreateDesktopItem : T.dynamic.action.createDesktopItem;
-
-      if (button) button.disabled = true;
-
-      showOperationOverlay(formatText(T.dynamic.operation.running, { name: noun }));
-
-      try {
-
-        if (entry.desktopEntryKey) await removeDesktopItem(entry);
-
-        // 移除已清服务端 key；沿用旧 key 会让创建命中「索引不可用视为已创建」的分支，
-        // 结果什么都没建却提示已创建。
-        await createDesktopItem({ ...entry, desktopEntryKey: null });
-
-        await loadDesktopIndex();
-
-        showNotice(formatText(T.dynamic.messages.desktopItemCreated, { target: entry.displayName }), "ok");
-
-        refreshListSilently();
-
-      } catch (error) {
-
-        // 移除阶段可能已经成功（服务端 key 已清），不重载界面会一直停在「已创建」。
-        await loadDesktopIndex();
-
-        refreshListSilently();
-
-        showNotice(userMessage(ERROR_CODES.DEPLOY, T.dynamic.messages.desktopItemCreateFailed, errorDetail(error)), "warn");
-
-      } finally {
-
-        hideOperationOverlay();
-
-        if (button) button.disabled = false;
-
-      }
-
-    }
 
     async function uninstallEntry(id, button) {
 
@@ -2911,42 +2032,6 @@
 
       try {
 
-        const entry = currentEntries.find((item) => item.appname === id);
-
-        // 独立网页模式发不出宿主请求，桌面项删不掉，但定义照常删（设计 §9）；
-        // 宿主可用却明确拒绝时仍然中止，避免留下孤儿图标。
-        let desktopItemLeftBehind = false;
-
-        if (entry && entry.type === "folder" && entry.desktopEntryKey) {
-
-          if ((await ensureHostApp()) === "ready") {
-
-            try {
-
-              await removeDesktopItem(entry);
-
-            } catch (error) {
-
-              hideOperationOverlay();
-
-              showGeneralToast(userMessage(ERROR_CODES.DELETE, T.dynamic.messages.desktopItemRemoveFailed, errorDetail(error)));
-
-              if (button) button.disabled = false;
-
-              return;
-
-            }
-
-          } else {
-
-            desktopItemLeftBehind = true;
-
-            console.warn("desktop item left behind: host unavailable", entry.appname, entry.desktopEntryKey);
-
-          }
-
-        }
-
         const response = await fetchJsonWithTimeout(`${API_BASE}/api/entries/${encodeURIComponent(id)}`, { method: "DELETE" });
 
         // 网关可能返回非 JSON（登录页、错误页），解析失败也要给出可诊断的错误。
@@ -2981,18 +2066,7 @@
 
         hideOperationOverlay();
 
-        if (desktopItemLeftBehind) {
-
-          // 提示必须合成一条：showToast 共用同一个节点，分两次弹会互相覆盖。
-          const cleanupHint = formatText(T.dynamic.messages.desktopItemManualCleanup, { target: name });
-
-          showNotice(formatText(T.dynamic.messages.deleted, { target: name }) + " " + cleanupHint, "warn");
-
-        } else {
-
-          showGeneralToast(formatText(T.dynamic.messages.deleted, { target: name }));
-
-        }
+        showGeneralToast(formatText(T.dynamic.messages.deleted, { target: name }));
 
         await refreshAfterDelete();
 
@@ -3126,23 +2200,7 @@
 
     cropCanvas.addEventListener("wheel", onCropCanvasWheel, { passive: false });
 
-    if (folderBrowseButton) folderBrowseButton.addEventListener("click", browseFolderPath);
 
-    if (folderPathInput) folderPathInput.addEventListener("input", () => {
-
-      // 创建时按路径末段建议唯一标识，可手改；编辑态输入框只读，不覆盖。
-
-      if (folderPathInput.value !== "" && formAppnameInput && !formAppnameInput.readOnly && formAppnameInput.value === "") {
-
-        const segment = folderPathInput.value.trim().split("/").filter(Boolean).pop() || "";
-
-        const slug = segment.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 12);
-
-        if (slug && /^[a-z]/.test(slug)) formAppnameInput.value = slug;
-
-      }
-
-    });
 
     formAppnameInput.addEventListener("input", () => {
 
@@ -3243,7 +2301,6 @@
 
       const deleteId = target.getAttribute("data-delete");
 
-      const removeDesktopId = target.getAttribute("data-remove-desktop");
 
       if (deployId) {
 
@@ -3272,14 +2329,6 @@
       if (disableId) {
 
         await setRuntime(disableId, "stop", target);
-
-        return;
-
-      }
-
-      if (removeDesktopId) {
-
-        await removeDesktopItemById(removeDesktopId, target);
 
         return;
 

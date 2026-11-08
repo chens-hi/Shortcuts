@@ -109,6 +109,25 @@ func TestJSONRepositoryRejectsDirtyAppname(t *testing.T) {
 	}
 }
 
+func TestJSONRepositoryDropsUnsupportedTypes(t *testing.T) {
+	// folder 快捷方式已交给桌面原生功能：数据文件里残留的条目必须在加载时丢掉，
+	// 界面上只会出现还有实现的类型。
+	path := filepath.Join(t.TempDir(), "shortcuts.json")
+	content := `{"version":1,"entries":[` +
+		`{"type":"folder","appname":"photos","displayName":"照片","version":"1.0.0","config":{"path":"/vol1/1000/照片"},"desktopEntryKey":"folder:57"},` +
+		`{"type":"internal_port","appname":"moviepilot","displayName":"MoviePilot","version":"1.0.0","config":{"protocol":"http","port":"13000","path":"/","openMode":"iframe"}}]}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	loaded, err := NewJSONRepository(path).Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].AppName != "moviepilot" {
+		t.Fatalf("unexpected loaded entries: %#v", loaded)
+	}
+}
+
 func mustConfig(t *testing.T, raw string) []byte {
 	t.Helper()
 	return []byte(raw)

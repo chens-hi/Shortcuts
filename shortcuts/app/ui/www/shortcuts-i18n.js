@@ -1,4 +1,4 @@
-const SHORTCUTS_VERSION = "1.0.287";
+const SHORTCUTS_VERSION = "1.1.2";
 
 
 
@@ -34,8 +34,6 @@ const T = {
 
     typeExternalUrl: "外部链接",
 
-    typeFolder: "文件夹",
-
     sectionDisplay: "捷径显示",
 
     appname: "唯一标识",
@@ -55,12 +53,6 @@ const T = {
     path: "访问路径",
 
     urlLabel: "目标地址",
-
-    folderPathLabel: "文件夹路径",
-
-    folderPathPlaceholder: "例如 /vol1/1000/照片",
-
-    folderBrowse: "浏览选择",
 
     urlPlaceholder: "请输入访问地址",
 
@@ -106,8 +98,6 @@ const T = {
 
     typeDescExternal: "跳转到外部网址",
 
-    typeDescFolder: "打开本地文件夹",
-
     cropTitle: "裁剪图标",
 
     closeCrop: "关闭裁剪",
@@ -152,12 +142,6 @@ const T = {
 
       outdated: "待更新",
 
-      folderUndeployed: "未创建",
-
-      folderDeployed: "已创建",
-
-      desktopMissing: "桌面项丢失"
-
     },
 
     runtime: {
@@ -183,12 +167,6 @@ const T = {
       edit: "编辑",
 
       delete: "删除",
-
-      createDesktopItem: "创建",
-
-      removeDesktopItem: "销毁",
-
-      recreateDesktopItem: "重建",
 
       saving: "保存中…"
 
@@ -225,14 +203,6 @@ const T = {
       requiredUrl: "请填写跳转地址",
 
       requiredPath: "请填写文件夹路径",
-
-      folderBadFormat: "文件夹路径必须以 / 开头，且不能是根目录",
-
-      folderNotExist: "文件夹路径不存在或不是目录，请检查后重试",
-
-      folderValidateUnavailable: "无法校验文件夹路径，请稍后重试",
-
-      folderPickFailed: "选择文件夹失败：{detail}",
 
       deleteConfirm: "确定删除这条捷径？相关的桌面项或已部署子应用会一起清理"
 
@@ -283,18 +253,6 @@ const T = {
       runtimeStarted: "已启用 {name}",
 
       runtimeStopped: "已停用 {name}",
-
-      desktopItemCreated: "已创建桌面项 {target}",
-
-      desktopItemRemoved: "已销毁桌面项 {target}",
-
-      desktopItemCreateFailed: "创建桌面项失败，请稍后重试",
-
-      desktopItemRemoveFailed: "销毁桌面项失败，请稍后重试",
-
-      desktopItemHostOnly: "请在飞牛桌面中打开「快捷图标」",
-
-      desktopItemManualCleanup: "桌面图标「{target}」可能仍在，请手动删除"
 
     }
 
@@ -468,8 +426,6 @@ function initLocalizedHtml() {
 
   setText("typeExternalURL", T.html.typeExternalUrl);
 
-  setText("typeFolderLabel", T.html.typeFolder);
-
   setText("typePickerTitle", T.html.typePickerTitle);
 
   const typePickerCloseButton = document.getElementById("typePickerCloseButton");
@@ -480,17 +436,9 @@ function initLocalizedHtml() {
 
   setText("typeCardExternal", T.html.typeExternalUrl);
 
-  setText("typeCardFolder", T.html.typeFolder);
-
   setText("typeCardInternalDesc", T.html.typeDescInternal);
 
   setText("typeCardExternalDesc", T.html.typeDescExternal);
-
-  setText("typeCardFolderDesc", T.html.typeDescFolder);
-
-  setText("folderPathLabel", T.html.folderPathLabel);
-
-  setText("folderBrowseButton", T.html.folderBrowse);
 
   setText("urlLabel", T.html.urlLabel);
 
@@ -501,10 +449,6 @@ function initLocalizedHtml() {
   const _urlInput = document.querySelector("#url");
 
   if (_urlInput) _urlInput.placeholder = T.html.urlPlaceholder;
-
-  const _folderPathInput = document.querySelector("#folderPath");
-
-  if (_folderPathInput) _folderPathInput.placeholder = T.html.folderPathPlaceholder;
 
 
 

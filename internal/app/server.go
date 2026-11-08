@@ -46,7 +46,6 @@ func NewServer() *Server {
 	providerRegistry := provider.NewRegistry()
 	providerRegistry.Register(provider.InternalPortProvider{})
 	providerRegistry.Register(provider.ExternalURLProvider{})
-	providerRegistry.Register(provider.FolderProvider{})
 	repo := repository.NewJSONRepository(cfg.DataFile)
 	iconService := &icons.Service{Dir: cfg.IconDir, DefaultDir: cfg.DefaultIconDir()}
 	builder := &packagebuilder.Builder{
@@ -152,7 +151,6 @@ func (s *Server) register() {
 	s.router.HandleFunc("/api/entries", s.handleEntries)
 	s.router.HandleFunc("/api/entries/", s.handleEntryByID)
 	s.router.HandleFunc("/api/deploy-all", s.handleDeployAll)
-	s.router.HandleFunc("/api/validate-folder", s.handleValidateFolder)
 	s.router.HandleFunc("/api/system", s.handleSystem)
 	s.router.HandleFunc("/icon/", s.handleIcon)
 	s.router.HandleFunc("/icons/", s.handleDefaultIcon)
@@ -515,9 +513,6 @@ func (s *Server) handleEntryByID(w http.ResponseWriter, r *http.Request) {
 			}
 			s.handleIconUpload(w, r, appName)
 			return
-		case "desktop-item":
-			s.handleDesktopItem(w, r, appName)
-			return
 		case "deploy", "start", "stop", "uninstall":
 			if r.Method != http.MethodPost {
 				writeError(w, http.StatusMethodNotAllowed, model.ErrMethod)
@@ -587,14 +582,6 @@ func (s *Server) handleDeployAll(w http.ResponseWriter, r *http.Request) {
 	}
 	results := []service.ActionResult{}
 	for _, entry := range entries {
-		if entry.Type == model.EntryTypeFolder {
-			results = append(results, service.ActionResult{
-				AppName: entry.ShortcutAppname,
-				Code:    "DEPLOY_SKIPPED_CLIENT",
-				Output:  "folder shortcuts are created on the desktop client",
-			})
-			continue
-		}
 		action, actionErr := s.Svc.DeployEntry(entry.AppName)
 		if actionErr != nil {
 			// 单条失败不影响整批，聚合进 results 由前端逐条提示。
@@ -621,24 +608,6 @@ func (s *Server) appVersion() string {
 		return ""
 	}
 	return version
-}
-
-// handleValidateFolder 校验文件夹快捷方式的目标路径是否真实存在且是目录。
-// 只服务于前端手填路径时的保存前校验；agent 不可用时返回 503，前端按
-// 「无法确认存在性」fail-closed，不放行可能不存在的路径。
-func (s *Server) handleValidateFolder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, model.ErrMethod)
-		return
-	}
-	valid, code, err := s.Svc.ValidateFolderPath(r.URL.Query().Get("path"))
-	if err != nil {
-		// agent 不可用：无法确认存在性，前端按 fail-closed 不放行。503 比 409 更贴切，
-		// 前端只认非 2xx，不会把英文 detail 当成用户文案。
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"valid": false, "code": "unavailable"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": valid, "code": code})
 }
 
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {

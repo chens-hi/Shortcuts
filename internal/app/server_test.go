@@ -139,47 +139,6 @@ func entryGatewayPrefix() string {
 	return "/app/shortcuts"
 }
 
-func TestHandleValidateFolder(t *testing.T) {
-	app := newStubAppCenter()
-	server := handlerForServerTest(t, app)
-	serve := func(path string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, "/app/shortcuts/api/validate-folder?path="+url.QueryEscape(path), nil)
-		rr := httptest.NewRecorder()
-		stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, req)
-		return rr
-	}
-
-	// 默认 stub 报告路径存在 → valid=true。
-	if rr := serve("/vol1/1000/照片"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"valid": true`) {
-		t.Fatalf("expected valid=true 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	// 注入 stat 失败（路径不存在/不是目录）→ valid=false。
-	app.statResult = &deployer.CommandResult{OK: false, Error: "path does not exist or is not a directory"}
-	if rr := serve("/vol1/1000/不存在"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"valid": false`) {
-		t.Fatalf("expected valid=false 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	// 格式非法路径 → valid=false（格式校验在服务端本地完成，无需 agent）。
-	if rr := serve("vol1/1000"); rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"valid": false`) {
-		t.Fatalf("expected valid=false 200 for bad format, got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	// agent 不可用 → 503，fail-closed。
-	app.statResult = &deployer.CommandResult{Unavailable: true, Error: "unavailable: agent not configured"}
-	if rr := serve("/vol1/1000/照片"); rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 when agent unavailable, got %d body=%s", rr.Code, rr.Body.String())
-	}
-
-	// 方法不允许 → 405。
-	req := httptest.NewRequest(http.MethodPost, "/app/shortcuts/api/validate-folder", nil)
-	rr := httptest.NewRecorder()
-	stripHandler(server.router, entryGatewayPrefix()).ServeHTTP(rr, req)
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405, got %d", rr.Code)
-	}
-}
-
 // stubAppCenter 让 handler 测试不依赖宿主机上的 appcenter-cli。
 // 真实 Manager 的 List 在没装 CLI 的机器上会返回错误，而 /api/entries 与
 // /api/deploy-all 都靠 List 取列表，测试会变成「这台机器装没装 CLI」的探测。
@@ -188,8 +147,6 @@ type stubAppCenter struct {
 	mu        sync.Mutex
 	installed map[string]deployer.InstalledApp
 	calls     []string
-	// statResult 覆盖 StatDir 的返回值；nil 时 StatDir 默认报告路径存在且是目录。
-	statResult *deployer.CommandResult
 }
 
 func newStubAppCenter(installed ...deployer.InstalledApp) *stubAppCenter {
@@ -244,13 +201,6 @@ func (s *stubAppCenter) Uninstall(appName string) deployer.CommandResult {
 func (s *stubAppCenter) Ping() (bool, deployer.CommandResult) {
 	return true, deployer.CommandResult{OK: true}
 }
-func (s *stubAppCenter) StatDir(dir string) deployer.CommandResult {
-	s.call("stat-dir:" + dir)
-	if s.statResult != nil {
-		return *s.statResult
-	}
-	return deployer.CommandResult{OK: true, Stdout: dir}
-}
 
 func handlerForServerTest(t *testing.T, apps ...*stubAppCenter) *Server {
 	t.Helper()
@@ -272,7 +222,6 @@ func handlerForServerTest(t *testing.T, apps ...*stubAppCenter) *Server {
 	providers := provider.NewRegistry()
 	providers.Register(provider.InternalPortProvider{})
 	providers.Register(provider.ExternalURLProvider{})
-	providers.Register(provider.FolderProvider{})
 	iconSvc := &icons.Service{Dir: cfg.IconDir}
 	svc := service.NewService(cfg, repository.NewJSONRepository(cfg.DataFile), providers, nil, appCenter, iconSvc)
 	server := &Server{Config: cfg, Svc: svc, router: http.NewServeMux(), log: logger.New()}

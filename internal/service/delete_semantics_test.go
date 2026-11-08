@@ -95,16 +95,6 @@ func (c *recordingAppCenter) InstallLocal(dir string) deployer.CommandResult {
 func (c *recordingAppCenter) Ping() (bool, deployer.CommandResult) {
 	return true, deployer.CommandResult{}
 }
-func (c *recordingAppCenter) StatDir(dir string) deployer.CommandResult {
-	c.call("stat-dir:" + dir)
-	// 模拟 root agent 的真实 stat：路径存在且是目录才算通过。现有用例不调用
-	// StatDir（folder 保存校验是新增行为），所以改成真实 stat 不会影响它们。
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return deployer.CommandResult{OK: false, Error: "path does not exist or is not a directory"}
-	}
-	return deployer.CommandResult{OK: true, Stdout: dir}
-}
 
 func containsCall(calls []string, want string) bool {
 	for _, c := range calls {
@@ -158,7 +148,6 @@ func newDeleteTestService(t *testing.T, app *recordingAppCenter, seed []map[stri
 	registry := provider.NewRegistry()
 	registry.Register(provider.InternalPortProvider{})
 	registry.Register(provider.ExternalURLProvider{})
-	registry.Register(provider.FolderProvider{})
 	return &Service{
 		Config: config.Config{
 			MainAppname: "shortcuts",

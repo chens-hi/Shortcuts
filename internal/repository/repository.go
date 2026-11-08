@@ -2,6 +2,7 @@ package repository
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -46,6 +47,15 @@ func (r *JSONRepository) Load() ([]model.Entry, error) {
 	normalized := make([]model.Entry, 0, len(data.Entries))
 	for _, entry := range data.Entries {
 		entry = entry.Normalize()
+		// 已移除的类型（folder 快捷方式改由桌面原生功能承担）在加载时直接丢弃。
+		// 保留下来只会得到一条界面上点什么都报错的死条目：没有对应的 Provider，
+		// 校验、部署、编辑全部失败，而它的桌面项标识也没有任何代码再去消费。
+		// 放在 Normalize 之后判断：Normalize 把空 type 补成 internal_port，
+		// 早判会让缺 type 的老数据被当成未知类型误删。
+		if !model.EntryTypeSupported(entry.Type) {
+			slog.Warn("skipping entry with unsupported type", "appname", entry.AppName, "type", entry.Type)
+			continue
+		}
 		// appname 会被拼进构建与安装路径（filepath.Join(BuildDir, child)），
 		// 数据文件里带路径分隔符的脏名字能把 RemoveAll/构建写到 build 之外。
 		if !model.AppNameValid(entry.AppName) {

@@ -338,12 +338,7 @@ func (s *Service) DeleteEntry(appName string) (DeleteResult, error) {
 		return DeleteResult{}, model.Errorf(model.ErrNotFound, "entry not found")
 	}
 	child := entry.ChildAppname(s.Config.MainAppname)
-	// 新机制创建的 folder 条目从未部署过子应用，DeployedVersion 为空时不该
-	// 发起一次注定失败的卸载；只有旧机制留下的子应用才需要随之清理。
 	uninstallChild := child
-	if entry.Type == model.EntryTypeFolder && entry.DeployedVersion == "" {
-		uninstallChild = ""
-	}
 	if uninstallChild != "" {
 		if !s.claimChild(uninstallChild) {
 			return DeleteResult{}, model.Errorf(model.ErrDeploy, "子应用 %s 正在操作中，请稍后再试", uninstallChild)
@@ -427,11 +422,6 @@ func (s *Service) DeployEntry(appName string) (ActionResult, error) {
 		return ActionResult{}, model.Errorf(model.ErrNotFound, "entry not found")
 	}
 	entry := entries[idx]
-	// 文件夹快捷方式由桌面端创建，服务端没有可安装的子应用。
-	// 必须在 claimChild 之前返回，否则会留下一个永远不会释放的占位。
-	if entry.Type == model.EntryTypeFolder {
-		return ActionResult{}, model.Errorf(model.ErrValidation, "folder shortcuts are created on the desktop client")
-	}
 	child := entry.ChildAppname(s.Config.MainAppname)
 	if !s.claimChild(child) {
 		return ActionResult{AppName: child, Code: string(model.ErrDeploy), Output: "deploy already in progress"},
@@ -816,8 +806,6 @@ func (s *Service) normalizeInput(input EntryInput, existing *model.Entry) (model
 			entry.DisplayIcon = existing.DisplayIcon
 		}
 		entry.DeployedVersion = existing.DeployedVersion
-		// entryKey 只能由桌面端创建后回写，编辑名称/路径不能把它抹掉。
-		entry.DesktopEntryKey = existing.DesktopEntryKey
 	}
 	// 更新时未显式提供 desiredState 则保留旧值，
 	// 否则"已停止"的条目改个描述就会被静默改回运行中。
@@ -953,23 +941,6 @@ func (s *Service) validateAgainst(entries []model.Entry, entry model.Entry, self
 	if err := providerObj.Validate(entry); err != nil {
 		return err
 	}
-	// 文件夹快捷方式的目标路径必须真实存在且是目录。格式校验由 provider 完成
-	// （它无法访问 agent，且对 /vol1 共享目录无读权限、本地 stat 不可靠）；
-	// 存在性必须走 root agent。agent 不可用时按 fail-closed 拒绝，不放行可能
-	// 不存在的路径。这里在写锁内做一次快速 stat，agent 就绪时几乎瞬时完成。
-	if entry.Type == model.EntryTypeFolder {
-		folderConfig, err := provider.DecodeConfig[model.FolderConfig](entry.Config)
-		if err != nil {
-			return err
-		}
-		valid, _, err := s.ValidateFolderPath(folderConfig.Path)
-		if err != nil {
-			return model.Errorf(model.ErrRuntime, "cannot validate folder path: %s", err.Error())
-		}
-		if !valid {
-			return model.Errorf(model.ErrValidation, "folder path does not exist or is not a directory")
-		}
-	}
 	return nil
 }
 
@@ -1054,16 +1025,6 @@ func (s *Service) childAtCurrentVersion(apps map[string]deployer.InstalledApp, c
 func decorate(entry model.Entry, apps map[string]deployer.InstalledApp, mainApp string) model.Entry {
 	child := entry.ChildAppname(mainApp)
 	entry.ShortcutAppname = child
-	// 文件夹快捷方式不再有子应用：状态只由桌面项标识决定，运行状态对它没有意义。
-	if entry.Type == model.EntryTypeFolder {
-		if strings.TrimSpace(entry.DesktopEntryKey) == "" {
-			entry.Status = model.StatusUndeployed
-		} else {
-			entry.Status = model.StatusDeployed
-		}
-		entry.Runtime = model.RuntimeUnknown
-		return entry
-	}
 	installed, ok := apps[child]
 	if !ok {
 		entry.Status = model.StatusUndeployed

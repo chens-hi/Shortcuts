@@ -16,7 +16,6 @@ import (
 	"github.com/chens-hi/shortcuts/internal/config"
 	"github.com/chens-hi/shortcuts/internal/deployer"
 	"github.com/chens-hi/shortcuts/internal/logger"
-	"github.com/chens-hi/shortcuts/internal/model"
 	"github.com/chens-hi/shortcuts/internal/unixsock"
 )
 
@@ -100,12 +99,8 @@ func (s *Server) handle(conn net.Conn) {
 	s.log.Info("agent request received", "action", req.Action,
 		"dir", logger.SanitizeOutput(req.Dir, 200), "appname", logger.SanitizeOutput(req.AppName, 200))
 	// 并发封顶：每个请求都会拉起一条 root CLI，没有上限就是资源耗尽点。
-	// stat-dir 不启动任何 CLI（只 os.Stat），也不占并发槽：路径校验走保存链路，
-	// 一旦被卡住的 appcenter 命令占满槽位，保存会被拖到 CLI 超时（分钟级）才反馈。
-	if req.Action != "stat-dir" {
-		s.sem <- struct{}{}
-		defer func() { <-s.sem }()
-	}
+	s.sem <- struct{}{}
+	defer func() { <-s.sem }()
 	s.reply(conn, s.dispatch(req))
 }
 
@@ -133,26 +128,9 @@ func (s *Server) dispatch(req deployer.Command) deployer.CommandResult {
 			return deployer.CommandResult{OK: false, Via: "agent", Error: "appname not allowed"}
 		}
 		return s.run([]string{req.Action, req.AppName}, "")
-	case "stat-dir":
-		return statDir(req.Dir)
 	default:
 		return deployer.CommandResult{OK: false, Via: "agent", Error: "unknown action"}
 	}
-}
-
-// statDir 校验一个目录真实存在且是目录。只用 os.Stat，不执行任何命令：
-// root 进程读 /vol1 共享目录不受降权用户限制。路径格式沿用
-// model.IsValidFolderPath，与 server 侧保存校验共用同一条规则，避免两边
-// 各自一份正则漂移。
-func statDir(path string) deployer.CommandResult {
-	if !model.IsValidFolderPath(path) {
-		return deployer.CommandResult{OK: false, Via: "agent", Error: "stat dir path not allowed"}
-	}
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		return deployer.CommandResult{OK: false, Via: "agent", Error: "path does not exist or is not a directory"}
-	}
-	return deployer.CommandResult{OK: true, Via: "agent", Stdout: path}
 }
 
 func (s *Server) run(args []string, cwd string) deployer.CommandResult {

@@ -61,7 +61,6 @@ func newMergeTestService(t *testing.T, seed string) (*Service, string) {
 	registry := provider.NewRegistry()
 	registry.Register(provider.InternalPortProvider{})
 	registry.Register(provider.ExternalURLProvider{})
-	registry.Register(provider.FolderProvider{})
 	return &Service{
 		Config:    config.Config{MainAppname: "shortcuts", IconDir: iconDir},
 		Repo:      repository.NewJSONRepository(repoPath),
@@ -209,76 +208,5 @@ func TestUpdateEntryAbortsAndKeepsDataOnSchemaMismatch(t *testing.T) {
 	}
 	if string(got) != corrupt {
 		t.Fatalf("data file was overwritten: %s", got)
-	}
-}
-
-func folderSeedJSONWithPath(path string) string {
-	return `{
-  "version": 1,
-  "entries": [
-    {
-      "type": "folder",
-      "appname": "photos",
-      "displayName": "照片",
-      "description": "相册目录",
-      "desiredState": "running",
-      "version": "1.0.0",
-      "config": {"path": "` + path + `"}
-    }
-  ]
-}`
-}
-
-// folder 条目只改 path 的部分更新：新路径生效、旧字段保留、版本号提升。
-func TestUpdateEntryFolderPathMergesIntoExistingConfig(t *testing.T) {
-	oldPath := realFolderPath(t, "photos")
-	newPath := realFolderPath(t, "photos-movies")
-	svc, _ := newMergeTestService(t, folderSeedJSONWithPath(oldPath))
-
-	result, err := svc.UpdateEntry("photos", EntryInput{
-		AppName:     "photos",
-		DisplayName: "照片",
-		Path:        newPath,
-		Provided:    map[string]bool{"path": true},
-	})
-	if err != nil {
-		t.Fatalf("UpdateEntry failed: %v", err)
-	}
-	cfg := model.FolderConfig{}
-	if err := json.Unmarshal(result.Entry.Config, &cfg); err != nil {
-		t.Fatalf("unmarshal config: %v", err)
-	}
-	if cfg.Path != newPath {
-		t.Fatalf("Path = %q, want %q", cfg.Path, newPath)
-	}
-	if result.Entry.Description != "相册目录" {
-		t.Fatalf("Description = %q, want preserved", result.Entry.Description)
-	}
-	if !result.Changed || result.Entry.Version != "1.0.1" {
-		t.Fatalf("Changed=%v Version=%q, want bumped to 1.0.1", result.Changed, result.Entry.Version)
-	}
-}
-
-// folder 条目不提供任何配置字段时不得误清配置，版本号保持不变。
-func TestUpdateEntryFolderKeepsConfigWhenNothingProvided(t *testing.T) {
-	path := realFolderPath(t, "photos")
-	svc, _ := newMergeTestService(t, folderSeedJSONWithPath(path))
-
-	result, err := svc.UpdateEntry("photos", EntryInput{
-		AppName:     "photos",
-		DisplayName: "照片",
-	})
-	if err != nil {
-		t.Fatalf("UpdateEntry failed: %v", err)
-	}
-	cfg := model.FolderConfig{}
-	if err := json.Unmarshal(result.Entry.Config, &cfg); err != nil {
-		t.Fatalf("unmarshal config: %v", err)
-	}
-	if cfg.Path != path {
-		t.Fatalf("Path = %q, want %q", cfg.Path, path)
-	}
-	if result.Changed || result.Entry.Version != "1.0.0" {
-		t.Fatalf("Changed=%v Version=%q, want unchanged 1.0.0", result.Changed, result.Entry.Version)
 	}
 }

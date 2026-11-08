@@ -1,8 +1,6 @@
 package model
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -70,39 +68,6 @@ func TestIsValidURL(t *testing.T) {
 	} {
 		if IsValidURL(rawURL) {
 			t.Fatalf("IsValidURL(%q) = true, want false", rawURL)
-		}
-	}
-}
-
-func TestIsValidFolderPath(t *testing.T) {
-	for _, path := range []string{"/vol1/1000", "/vol1/1000/照片 备份", "/" + strings.Repeat("a", 500)} {
-		if !IsValidFolderPath(path) {
-			t.Fatalf("IsValidFolderPath(%q) = false, want true", path)
-		}
-	}
-	for _, path := range []string{"", "/", "vol1/1000", "C:/data", "/vol1/\tx", "/vol1/\n x", "/" + strings.Repeat("a", 513)} {
-		if IsValidFolderPath(path) {
-			t.Fatalf("IsValidFolderPath(%q) = true, want false", path)
-		}
-	}
-}
-
-func TestConfigFromInputFolder(t *testing.T) {
-	raw, err := ConfigFromInput(EntryTypeFolder, EntryConfigInput{Path: " /vol1/1000 "})
-	if err != nil {
-		t.Fatalf("ConfigFromInput = %v, want nil", err)
-	}
-	var config FolderConfig
-	if err := json.Unmarshal(raw, &config); err != nil {
-		t.Fatalf("folder config is not valid JSON: %v", err)
-	}
-	if config.Path != "/vol1/1000" {
-		t.Fatalf("path = %q, want /vol1/1000 (trimmed)", config.Path)
-	}
-
-	for _, input := range []EntryConfigInput{{Path: ""}, {Path: "relative"}} {
-		if _, err := ConfigFromInput(EntryTypeFolder, input); err == nil {
-			t.Fatalf("ConfigFromInput(%+v) = nil error, want validation error", input)
 		}
 	}
 }

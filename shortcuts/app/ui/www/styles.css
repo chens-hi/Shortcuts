@@ -332,7 +332,7 @@
     /* 类型选择弹窗：三张卡片，窄屏堆叠为横向行。 */
     .type-picker-modal { width: min(560px, 100%); max-height: calc(100dvh - var(--overlay-block-pad) * 2); overflow-y: auto; }
 
-    .type-picker-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .type-picker-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 
     .type-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 22px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-alt); color: var(--text); cursor: pointer; text-align: center; transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease; }
 
@@ -371,14 +371,6 @@
       .type-card svg { width: 24px; height: 24px; }
 
     }
-
-    .folder-path-row { display: flex; gap: 8px; align-items: stretch; }
-
-    .folder-path-row input { flex: 1 1 auto; min-width: 0; }
-
-    .folder-browse { flex: 0 0 auto; white-space: nowrap; cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 8px 14px; font-size: 13px; }
-
-    .folder-browse:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }
 
     .icon-file-trigger { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; }
 
@@ -467,9 +459,6 @@
   }
 
   .hidden { display: none !important; }
-
-  /* 占位隐藏：保留布局空间但不显示、不可聚焦，用于让各类型页签高度一致。 */
-  .ghosted { visibility: hidden; }
 
     .radio-group { display: flex; gap: 20px; align-items: center; }
 
@@ -600,13 +589,9 @@
 
       .form-actions button { width: auto; flex: 1; min-height: 44px; }
 
-      /* 单列下各类型内容行数不同（端口 6 行 vs 链接/文件夹 4-5 行），
+      /* 单列下各类型内容行数不同，
          高度钉满可用空间，切换页签才不会跳；这也是移动端全屏对话框的惯例。 */
       .entry-modal { height: calc(100dvh - var(--overlay-block-pad) * 2); }
-
-      /* 高度已钉满，ghosted 占位不再必要；恢复常规隐藏，
-         免得文件夹页签在路径字段上下留出大片空白。 */
-      .ghosted { display: none; }
 
       /* 输入控件 16px：iOS Safari 聚焦小于 16px 的输入框会自动放大页面。 */
       #entryForm input, #entryForm select, #entryForm .description-field { font-size: 16px; }

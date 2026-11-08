@@ -61,8 +61,7 @@ func TestReorderEntriesAppliesOrderWithoutSideEffects(t *testing.T) {
 			cur.DeployedVersion != old.DeployedVersion ||
 			cur.DesiredState != old.DesiredState ||
 			cur.DisplayName != old.DisplayName ||
-			string(cur.Config) != string(old.Config) ||
-			cur.DesktopEntryKey != old.DesktopEntryKey {
+			string(cur.Config) != string(old.Config) {
 			t.Fatalf("entry %s changed beyond order: before=%+v after=%+v", old.AppName, old, cur)
 		}
 	}

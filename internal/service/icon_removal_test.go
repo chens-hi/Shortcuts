@@ -28,7 +28,6 @@ func (fakeAppCenter) Uninstall(appName string) deployer.CommandResult {
 	return deployer.CommandResult{}
 }
 func (fakeAppCenter) Ping() (bool, deployer.CommandResult) { return true, deployer.CommandResult{} }
-func (fakeAppCenter) StatDir(dir string) deployer.CommandResult { return deployer.CommandResult{OK: true} }
 
 const seededEntryJSON = `{
   "version": 1,

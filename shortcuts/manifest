@@ -1,7 +1,7 @@
 appname=shortcuts
-version=1.0.287
+version=1.1.2
 display_name=快捷图标
-desc=快捷图标 是飞牛 fnOS 原生应用，把局域网服务的端口与路径生成为独立的桌面快捷入口。
+desc=快捷图标 是飞牛 fnOS 原生快捷入口管理器：一键创建桌面原生图标！
 source=thirdparty
 platform=x86
 maintainer=chens-hi

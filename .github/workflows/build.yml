@@ -47,13 +47,13 @@ jobs:
           ./tools/sync-version.ps1
           ./tools/validate-ui.ps1
 
-      - name: Build and package (linux-amd64 + linux-arm64)
+      - name: Build and package (platform=all merged fpk)
         shell: pwsh
         run: ./tools/package-shortcuts.ps1
 
       - name: Verify package
         shell: pwsh
-        run: ./tools/check-package.ps1 -PackagePath "dist/shortcuts-${{ steps.ver.outputs.version }}-linux-amd64.fpk"
+        run: ./tools/check-package.ps1 -PackagePath "dist/shortcuts-${{ steps.ver.outputs.version }}.fpk"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

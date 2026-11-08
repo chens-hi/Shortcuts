@@ -14,8 +14,18 @@ type EntryType string
 const (
 	EntryTypeInternalPort EntryType = "internal_port"
 	EntryTypeExternalURL  EntryType = "external_url"
-	EntryTypeFolder       EntryType = "folder"
 )
+
+// EntryTypeSupported 判断类型是否还在本版本内实现。文件夹快捷方式已交给
+// 桌面原生功能，旧数据文件里残留的 folder 条目按不支持处理：加载时直接丢弃。
+func EntryTypeSupported(entryType EntryType) bool {
+	switch entryType {
+	case EntryTypeInternalPort, EntryTypeExternalURL:
+		return true
+	default:
+		return false
+	}
+}
 
 const (
 	StateRunning = "running"
@@ -48,7 +58,6 @@ type Entry struct {
 	Runtime          string          `json:"runtime,omitempty"`
 	InstalledVersion string          `json:"installedVersion,omitempty"`
 	RawStatus        string          `json:"rawStatus,omitempty"`
-	DesktopEntryKey  string          `json:"desktopEntryKey,omitempty"`
 }
 
 type InternalPortConfig struct {
@@ -61,10 +70,6 @@ type InternalPortConfig struct {
 type ExternalURLConfig struct {
 	URL      string `json:"url"`
 	OpenMode string `json:"openMode"`
-}
-
-type FolderConfig struct {
-	Path string `json:"path"`
 }
 
 type EntryConfigInput struct {
@@ -139,16 +144,6 @@ func ConfigFromInput(entryType EntryType, input EntryConfigInput) (json.RawMessa
 			return nil, Errorf(ErrValidation, "openMode must be url or iframe")
 		}
 		return json.Marshal(ExternalURLConfig{URL: rawURL, OpenMode: openMode})
-	}
-	if entryType == EntryTypeFolder {
-		folderPath := strings.TrimSpace(input.Path)
-		if folderPath == "" {
-			return nil, Errorf(ErrValidation, "path is required")
-		}
-		if !IsValidFolderPath(folderPath) {
-			return nil, Errorf(ErrValidation, "path must be an absolute folder path starting with /")
-		}
-		return json.Marshal(FolderConfig{Path: folderPath})
 	}
 	if strings.TrimSpace(input.Port) == "" {
 		return nil, Errorf(ErrValidation, "port is required")
@@ -225,25 +220,6 @@ func IsValidPort(port string) bool {
 		value = value*10 + int(r-'0')
 	}
 	return value >= 1 && value <= 65535
-}
-
-// IsValidFolderPath 校验文件夹快捷方式的目标路径：必须是绝对内部路径。
-// 根目录不是快捷方式的目标（宿主的默认起始位置），同样拒绝。
-// 路径会被构建进子应用启动页并传给 openFileManager，控制字符会破坏
-// 生成页面的语法，这里直接拒绝。
-func IsValidFolderPath(path string) bool {
-	if path == "" || path == "/" || !strings.HasPrefix(path, "/") {
-		return false
-	}
-	if len(path) > 512 {
-		return false
-	}
-	for _, r := range path {
-		if r < 0x20 || r == 0x7f {
-			return false
-		}
-	}
-	return true
 }
 
 func IsValidURL(rawURL string) bool {
